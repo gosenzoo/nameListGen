@@ -1,0 +1,370 @@
+# spec.md — name-list-gen 仕様書
+
+> 機能追加・変更・バグ修正の際は、コード修正の前にこのファイルを更新し、承認を得ること（CLAUDE.md「開発フロー」参照）。
+> 「★要確認」は未決定の項目。提案値を書いてあるが、承認を得るまで確定ではない。
+
+## 1. 概要
+
+- **目的**: 合同誌の参加者のあとがきリストを、入稿用の PNG 画像（複数枚）として生成する。
+- **想定ユーザー**: 合同誌の主催者（ローカル環境で利用する）
+- **主なユースケース**:
+  1. 参加者情報をまとめた CSV ファイルをブラウザで選ぶ
+  2. ページ割りされたあとがきリストをプレビューで確認する
+  3. PNG をダウンロードして入稿データに使う
+
+## 2. 技術スタック
+
+| 項目 | 内容 |
+| --- | --- |
+| フレームワーク | Next.js 16.4.6（App Router） |
+| UI | React 19.3.0 |
+| 言語 | TypeScript 5（流用する描画エンジンは JavaScript のまま。`tsconfig.json` の `allowJs: true` で読み込む） |
+| スタイル | Tailwind CSS 4.3.3 |
+| リント | ESLint 9 + eslint-config-next |
+| 描画エンジン | trainLCD プロジェクトの lcdParts 描画エンジン（`public/Drawer/src/`）を流用 |
+| PNG 書き出し | trainLCD プロジェクトの `public/js/lcdCapture.js` を流用 |
+| 追加ライブラリ | なし |
+
+- 処理はすべてブラウザ内で完結する。CSV や画像をサーバーへ送信しない（個人情報保護）。
+
+## 3. 機能一覧
+
+| ID | 機能名 | 概要 | 状態 |
+| --- | --- | --- | --- |
+| F-01 | CSV 読み込み | ファイル選択で CSV を読み込み、参加者リストに変換する | 実装済み |
+| F-02 | ページ割り | 参加者を CSV の順に 8 人ずつページに割り当てる | 実装済み |
+| F-03 | SVG 描画 | テンプレートと描画エンジンで各ページを SVG として描画する | 実装済み |
+| F-04 | プレビュー | 描画したページを画面に一覧表示する | 実装済み |
+| F-05 | PNG 書き出し | 各ページを B5・350dpi・塗り足し 3mm の PNG で保存する | 実装済み |
+| F-06 | はみ出し警告 | 枠に収まらず切れたテキストがあれば、該当の参加者を画面に表示する | 実装済み |
+
+## 4. 画面・ルーティング
+
+| パス | ファイル | 内容 |
+| --- | --- | --- |
+| `/` | `app/page.tsx` | 単一画面。CSV 選択 → プレビュー → ダウンロード |
+
+画面構成（上から）:
+
+1. **ファイル選択**: CSV ファイルを選ぶボタン（`<input type="file" accept=".csv">`）
+2. **読み込み結果**: 参加者数・ページ数を表示する。
+   - **CSV エラー**: 列不足の行など。行番号と内容を表示する。
+   - **はみ出し警告（F-06）**: 枠に収まらなかったテキスト。行番号・名前・項目名（名前／連絡先／あとがき）・切れた行数を表示する。
+3. **プレビュー**: 各ページを縮小表示する。「ガイド表示」をオンにすると、仕上がり線・安全領域・ブロック枠を重ねて表示する（ガイドは PNG には含めない）。
+4. **ダウンロード**: ページごとの「保存」ボタンと、「すべて保存」ボタン（全ページを順番にダウンロードする）。
+
+## 5. データモデル
+
+### 5.1 入力 CSV
+
+- **ファイル名**: 任意（資料では `input.csv`）。ブラウザのファイル選択で受け取る。
+- **ヘッダー行**: なし。1 行目から参加者データ。
+- **1 行 = 参加者 1 人**。列の順番は以下で固定。
+
+| 列 | 内容 | 備考 |
+| --- | --- | --- |
+| 1 | 名前 | |
+| 2 | 連絡先 | 改行を含むことがある |
+| 3 | あとがき本文 | 改行を含むことがある |
+| 4 | アイコン画像 | `data:image/png;base64,...` 形式の data URL |
+
+- **書式**: RFC 4180 準拠。改行・カンマ・ダブルクォートを含む値はダブルクォートで囲み、値の中のダブルクォートは `""` と二重にする。
+- **改行コード**: CRLF / LF のどちらも受け付ける。値の中の改行は LF に統一する。
+- **文字コード**: 自動判定する。まず UTF-8（BOM の有無を問わない）として厳密にデコードし、失敗したら Shift_JIS としてデコードする。
+- **行順**: CSV の行順のままリストに並べる（並べ替えはしない）。
+- **空行**: 読み飛ばす。
+- **列不足**: その行をエラーとして画面に表示し、描画からは外す。5 列目以降は無視する。
+- **アイコン**: `data:image/` で始まらない値は不正とみなし、アイコンなしで描画する（エラーではなく警告として表示する）。
+
+### 5.2 型定義
+
+```ts
+// 参加者 1 人分（CSV の 1 行）
+type Participant = {
+  line: number;      // CSV 上の行番号（1 始まり。エラー表示用）。値の中の改行も 1 行と数えた、そのレコードが始まる行
+  name: string;      // 名前
+  contact: string;   // 連絡先（改行を含みうる）
+  afterword: string; // あとがき本文（改行を含みうる）
+  icon: string;      // アイコン画像の data URL（不正・空なら空文字）
+};
+
+// CSV 読み込み結果
+type ParseResult = {
+  participants: Participant[];
+  errors: { line: number; message: string }[];   // 描画から外した行
+  warnings: { line: number; message: string }[]; // 描画はするが注意が必要な行（アイコン不正など）
+};
+
+// 1 ページ分
+type Page = {
+  pageNumber: number;           // 1 始まり（ファイル名に使う）
+  participants: Participant[];  // 最大 8 人
+};
+
+// はみ出し情報（描画エンジンから回収する）
+type OverflowInfo = {
+  line: number;                               // CSV 上の行番号
+  name: string;
+  field: 'name' | 'contact' | 'afterword';    // はみ出した項目
+  droppedLines: number;                       // 描画されなかった行数
+};
+```
+
+### 5.3 描画エンジンへ渡すデータ（drawParams）
+
+```ts
+// テンプレートの #{...} / lcd-arg から参照される
+type PageDrawParams = {
+  entries: {
+    line: number;      // はみ出し情報の回収に使う
+    name: string;
+    contact: string;
+    afterword: string;
+    icon: string;      // 空文字ならアイコンを描画しない
+  }[];                 // 最大 8 件。8 件未満のページは、足りない枠を空欄にする
+};
+```
+
+## 6. 出力 PNG
+
+| 項目 | 値 |
+| --- | --- |
+| 仕上がりサイズ | B5（182 × 257 mm） |
+| 塗り足し | 上下左右 3mm |
+| 塗り足し込みのサイズ | 188 × 263 mm |
+| 解像度 | 350dpi |
+| ピクセル数 | 2591 × 3624 px（188mm, 263mm × 350 ÷ 25.4 を四捨五入） |
+| 仕上がり線の位置 | 各辺から 41px（3mm） |
+| 安全領域 | 仕上がり線から内側 5mm（69px）。各辺から 110px |
+| 解像度情報 | PNG に `pHYs` チャンクを書き込み、350dpi（13780 ピクセル/m）として扱われるようにする |
+| 背景 | 白（塗り足し部分も含む） |
+| ファイル名 | `afterword_01.png`, `afterword_02.png` …（ページ番号を 2 桁でゼロ埋め） |
+| すべて保存 | ページごとの PNG を順番にダウンロードする（ZIP にはしない） |
+
+- 「すべて保存」では Chrome から「複数ファイルのダウンロードを許可しますか」と聞かれることがある。初回に許可する。
+
+## 7. レイアウト（詳細）
+
+単位は px（350dpi）。座標はページ左上（塗り足しの外側の角）が原点。
+
+### 7.1 ページ
+
+- 縦 4 × 横 2 の 8 ブロックを、安全領域（x: 110〜2481、y: 110〜3514）の中に配置する。
+- ページ番号・タイトルは入れない。
+- **ブロックの並び順**: 左上から右へ、次の段へ（1 段目左 → 1 段目右 → 2 段目左 …）。★要確認
+- 8 人に満たない最後のページは、残りの枠を空欄にする。
+
+| 項目 | 値 |
+| --- | --- |
+| ブロックの大きさ | 幅 1130 × 高さ 768 |
+| 横の間隔 | 111（ブロック 1130 × 2 + 111 = 2371 = 安全領域の幅） |
+| 縦の間隔 | 110（ブロック 768 × 4 + 110 × 3 = 3402 ≦ 安全領域の高さ 3404） |
+| 列の x 座標 | 左 110、右 1351 |
+| 段の y 座標 | 111, 989, 1867, 2745 |
+
+### 7.2 参加者ブロック（仮のデザイン）
+
+ブロック内の相対座標（ブロック左上が原点）:
+
+```
+(0,0)
+┌───────────────────────────────────────────┐
+│┌───────┐  名前（12pt 相当・1 行）            │
+││ icon  │                                    │
+││345×345│  連絡先（9pt 相当・複数行）         │
+│└───────┘                                    │
+│あとがき本文（9pt 相当・複数行・折り返し）   │
+│                                             │
+└───────────────────────────────────────────┘
+                                      (1130,768)
+```
+
+| 要素 | 部品 | 位置・大きさ（x, y, 幅, 高さ） | 備考 |
+| --- | --- | --- | --- |
+| アイコン | `<image lcdParts="static">` | 0, 0, 345, 345 | 25mm 角。`preserveAspectRatio="xMidYMid slice"` で中央を切り抜く |
+| 名前 | `lcdParts="text"` | 375, 0, 755, 60 | 1 行ぶんの高さの枠。文字の高さ 50（12pt 相当） |
+| 連絡先 | `lcdParts="text"` | 375, 90, 755, 255 | 文字の高さ 38（9pt 相当）、行間 22 → 4 行まで |
+| あとがき本文 | `lcdParts="text"` | 0, 375, 1130, 393 | 文字の高さ 38（9pt 相当）、行間 22 → 6 行まで |
+
+- **すべてのテキスト**は、流用元の `infoMessage.svg` のメッセージボックスと同じ `lcdParts="text"`（`TextBlockObj`）で描画する。指定は `breakType="1"`（幅を超えたら折り返す）、`lcd-holAlign="left"`、`lcd-verAlign="top"`。
+- **折り返し**: 流用元のまま（文字単位。禁則処理なし）。
+- **はみ出し**: 流用元のまま、枠の下端を超える行は描画しない。切れた行ははみ出し警告（F-06）で画面に表示する。
+- **フォント**: BIZ UDGothic（名前は太字 700、ほかは 400）。
+- **文字の大きさの指定方法**: 描画エンジンは「文字の高さ」（textLine の height）からフォントサイズを逆算する。上の「文字の高さ」は目安で、実装時に 9pt / 12pt に近くなるよう調整する。
+- **収まる文字数の目安**: あとがき本文は 1 行約 28 文字 × 6 行（約 170 文字）。これより長いあとがきは切れる。★要確認（長い人が多い場合は、文字の大きさかブロック内の配置を見直す）
+
+### 7.3 テンプレート（`public/templates/page.svg`）
+
+ブロックは関数入力（`lcd-funcDef`）で 1 つだけ定義し、`lcd-funcCall` で 8 回呼び出して複製する。各呼び出しには `lcd-arg` で何番目の参加者かを渡す。
+
+```xml
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2591 3624" width="2591" height="3624">
+  <!-- 背景（塗り足し込みで白） -->
+  <rect lcdParts="static" x="0" y="0" width="2591" height="3624" fill="#ffffff" />
+
+  <!-- 参加者ブロックの定義（関数入力）。funcArea の左上が呼び出し側 rect の左上に合わせられる -->
+  <g lcd-funcDef="entryBlock">
+    <rect lcdParts="funcArea" x="0" y="0" width="1130" height="768" />
+    <image lcdParts="static" isDraw="$entry.icon" lcd-href="#{$entry.icon}"
+           x="0" y="0" width="345" height="345" preserveAspectRatio="xMidYMid slice" />
+    <g lcdParts="text" lcdText="#{$entry.name}" lcd-overflow="name"
+       lcd-holAlign="left" lcd-verAlign="top" breakType="1">
+      <rect lcdParts="textArea" x="375" y="0" width="755" height="60" />
+      <rect lcdParts="textLine" x="375" y="0" width="755" height="50"
+            data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "700"}' />
+    </g>
+    <g lcdParts="text" lcdText="#{$entry.contact}" lcd-overflow="contact"
+       lcd-holAlign="left" lcd-verAlign="top" interval="22" breakType="1">
+      <rect lcdParts="textArea" x="375" y="90" width="755" height="255" />
+      <rect lcdParts="textLine" x="375" y="90" width="755" height="38"
+            data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "400"}' />
+    </g>
+    <g lcdParts="text" lcdText="#{$entry.afterword}" lcd-overflow="afterword"
+       lcd-holAlign="left" lcd-verAlign="top" interval="22" breakType="1">
+      <rect lcdParts="textArea" x="0" y="375" width="1130" height="393" />
+      <rect lcdParts="textLine" x="0" y="375" width="1130" height="38"
+            data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "400"}' />
+    </g>
+  </g>
+
+  <!-- 8 ブロックの呼び出し（並び順は 7.1） -->
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[0]" x="110"  y="111"  width="1130" height="768" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[1]" x="1351" y="111"  width="1130" height="768" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[2]" x="110"  y="989"  width="1130" height="768" />
+  <!-- …entries[7] まで -->
+</svg>
+```
+
+- 流用元の関数入力は、呼び出し側 rect の属性（`lcd-arg` など）を、展開したブロック内の各要素へコピーする。各要素は自分に付いた `lcd-arg` から `$entry` を受け取る。
+
+## 8. 描画エンジンの流用（詳細）
+
+### 8.1 方針
+
+- trainLCD の `public/Drawer/src/` から必要なファイルだけをコピーし、`lib/drawer/` に置いて改造する。
+- 元のファイルは `<script>` タグで読み込むグローバルクラス方式なので、ファイル先頭に `import`、末尾に `export` を足して ES モジュールにする。描画ロジックは、8.4 の改造点以外は変えない。
+- 流用元: `C:\document\dev\trainLCD_claude\trainLCD_claude`（参照のみ。変更しない）
+- 流用したファイルの先頭に、流用元のパスを日本語コメントで書く。
+
+### 8.2 コピーするファイル
+
+| コピー元（`public/` 以下） | コピー先 | 用途 |
+| --- | --- | --- |
+| `Drawer/src/main/Drawer.js` | `lib/drawer/Drawer.js` | 入口。関数入力の展開、テンプレートの解析と描画 |
+| `Drawer/src/objects/LcdPartsObj.js` | `lib/drawer/LcdPartsObj.js` | 部品の基底。`#{...}` の差し込み |
+| `Drawer/src/objects/GObj.js` | `lib/drawer/GObj.js` | `<g>` 系部品の基底 |
+| `Drawer/src/objects/GroupObj.js` | `lib/drawer/GroupObj.js` | ルート `<svg>` |
+| `Drawer/src/objects/StaticObj.js` | `lib/drawer/StaticObj.js` | 背景・アイコン画像 |
+| `Drawer/src/objects/TextBlockObj.js` | `lib/drawer/TextBlockObj.js` | 複数行テキスト（全テキスト） |
+| `Drawer/src/utility/TextDrawer.js` | `lib/drawer/TextDrawer.js` | 文字の計測と描画 |
+| `Drawer/src/utility/ExprParser.js` | `lib/drawer/ExprParser.js` | `isDraw` などの式の評価 |
+| `js/lcdCapture.js` | `lib/drawer/lcdCapture.js` | SVG → PNG 変換とフォントの埋め込み |
+
+- 使わない部品（`ArrangeObj`, `SlotObj`, `TextBoxObj`, `NumIconObj`, `GenerateObj`, `generators/*`, `MulShadowUtil`, `Animator`, `NumIconDrawer`, `IconDrawer`）はコピーしない。`Drawer.js` から、それらを使う分岐を削除する。
+
+### 8.3 Drawer の呼び出し方（簡略化後）
+
+```ts
+const drawer = new Drawer();
+drawer.load(templateSvg);                 // 関数入力の展開まで済ませて保持する
+const fragment = drawer.draw(drawParams); // ページ 1 枚分の SVG 要素（DocumentFragment）を返す
+const overflows = drawer.getOverflows();  // 直前の draw で切れたテキストの一覧
+```
+
+- 流用元の「ヘッダーとボディの 2 枚を重ねる」構造と、`drawParams.page` によるボディの切り替えをなくし、テンプレート 1 枚を描画する形にする。
+
+### 8.4 改造点
+
+| # | 対象 | 内容 | 理由 |
+| --- | --- | --- | --- |
+| 1 | `Drawer` | トップレベル（ルート `<svg>` 直下）の要素に `lcd-arg="名前:パス"` があれば、その値を `args` として部品に渡す。値が配列の場合は流用元の arrange と同じく要素ごとに複製し、配列でない場合（`entries[3]` など）はそのまま 1 つ渡す。値が `undefined`（そのページの人数が足りない）なら、その要素を描画しない | 流用元はトップレベルで `args` を常に空で渡しており、関数入力で複製したブロックに何番目の参加者かを渡せないため |
+| 2 | `Drawer` | `isDraw` の評価に、1 の `args` を使う | `isDraw="$entry.icon"` でアイコンなしを判定するため |
+| 3 | `StaticObj` | `lcd-href` 属性を `#{...}` の差し込み後の値で `href` に設定する。値が空なら `href` を付けない | 流用元には画像の参照先を差し込む仕組みがないため |
+| 4 | `TextBlockObj` | 枠の下端を超えて描画しなかった行数を記録する。`lcd-overflow` 属性（項目名）と `$entry.line` とあわせて `Drawer` が回収できるようにする | はみ出し警告（F-06）のため。描画結果は変えない |
+| 5 | `TextDrawer` | アイコン辞書がない（`null`）場合は、`:キー:` によるアイコン埋め込みの処理に入らず、普通の文字列として描画する | 連絡先の URL（`https://…`）などに含まれる `:` がアイコン記法と解釈されるのを防ぐため |
+| 6 | `lcdCapture` | 背景の塗りを黒から白に変える。PNG に `pHYs` チャンク（350dpi）を書き込む関数を追加する | 入稿用 |
+| 7 | 全体 | `window.lcdAnimator` などのグローバル変数と `console.log` のデバッグ出力をなくす | ES モジュール化と、個人情報をコンソールに出さないため |
+
+## 9. 処理の流れ
+
+```
+[ファイル選択]
+   │ File
+   ▼
+lib/csv.ts         parseCsv(file) → ParseResult
+   │                 ・ArrayBuffer を読み、UTF-8（厳密）→ Shift_JIS の順にデコード
+   │                 ・RFC 4180 で行と列に分ける（自前実装）
+   │                 ・列不足はエラー、不正なアイコンは警告
+   ▼
+lib/paginate.ts    paginate(participants) → Page[]
+   │                 ・CSV の順に 8 人ずつ区切る
+   ▼
+lib/render.ts      renderPages(pages) → { svg: SVGSVGElement, overflows: OverflowInfo[] }[]
+   │                 ・テンプレートを fetch して DOMParser で読み込み、Drawer.load（初回のみ）
+   │                 ・document.fonts.load で BIZ UDGothic（400 / 700）の読み込みを待つ
+   │                 ・ページごとに <svg> を作り、Drawer.draw(drawParams) の結果を入れる
+   ▼
+app/page.tsx       プレビュー表示・警告表示
+   │
+   ▼ 「保存」／「すべて保存」
+lib/exportPng.ts   exportPng(svg, pageNumber)
+                     ・lcdCapture.capture(svg, { width: 2591, height: 3624 }) で PNG の Blob を作る
+                     ・pHYs チャンクを書き込む
+                     ・<a download="afterword_01.png"> でダウンロード
+                     ・「すべて保存」は 1 枚ずつ順番に実行する
+```
+
+- フォントは Google Fonts の BIZ UDGothic を使う。画面表示用に `app/layout.tsx` で読み込み、PNG には `lcdCapture` の仕組み（使っている文字を含むフォントデータを SVG に埋め込む）で入れる。
+- 描画エンジンは DOM と canvas を使うため、描画と PNG 書き出しはブラウザ側（Client Component）だけで行う。
+
+## 10. ファイル構成
+
+| パス | 内容 |
+| --- | --- |
+| `app/page.tsx` | 画面（Client Component）。状態管理と各処理の呼び出し |
+| `app/layout.tsx` | フォントの読み込みを追加 |
+| `app/components/FileSelector.tsx` | CSV ファイル選択 |
+| `app/components/MessageList.tsx` | CSV エラー・警告・はみ出し警告の表示 |
+| `app/components/PagePreview.tsx` | 1 ページ分のプレビュー（ガイド表示・保存ボタンつき） |
+| `lib/types.ts` | 5.2 の型定義 |
+| `lib/csv.ts` | CSV の読み込み |
+| `lib/paginate.ts` | ページ割り |
+| `lib/render.ts` | テンプレートと描画エンジンで SVG を作る |
+| `lib/exportPng.ts` | PNG 書き出し・ダウンロード |
+| `lib/pngDpi.ts` | PNG に pHYs チャンクを書き込む |
+| `lib/drawer/` | 流用した描画エンジン（8.2） |
+| `public/templates/page.svg` | ページのテンプレート（7.3） |
+| `scripts/makeTestData.mjs` | 試験用 CSV を生成するスクリプト（Node.js 標準機能だけで単色のアイコン PNG を作る） |
+| `testdata/test.csv` | 試験用のダミーデータ（スクリプトで生成） |
+
+## 11. 非機能要件
+
+- **対応ブラウザ**: デスクトップ版 Chrome（最新版）
+- **レスポンシブ対応**: 不要（PC での利用を前提とする）
+- **データの保存先**: なし。読み込んだデータはブラウザのメモリ上だけで扱い、保存も送信もしない。
+- **フォント**: 文字の計測前にフォントの読み込みを待つ（描画エンジンが文字の高さを実測するため）。
+
+## 12. 開発上の取り決め
+
+- **個人情報保護**: 開発中は実データを使わない。試験用のダミーデータ（`testdata/test.csv`）だけを使う。実データの CSV をリポジトリに置かない（`.gitignore` に `input.csv` を追加する）。
+- **試験用データ**: 架空の名前・連絡先・あとがきと、単色のアイコンで作る。次のケースを含める。
+  - 改行・カンマ・ダブルクォートを含む値
+  - URL（`:` を含む）の連絡先
+  - 枠からはみ出す長いあとがき
+  - アイコンなし・不正なアイコン
+  - 列不足の行
+  - 8 の倍数でない人数（最後のページに空欄ができる）
+- **git**: ローカルリポジトリだけで管理し、remote には push しない。
+
+## 13. 未決事項・メモ
+
+- ★要確認: ブロックの並び順（7.1）、あとがき本文の収まる文字数（7.2）
+
+## 14. 変更履歴
+
+| 日付 | 内容 |
+| --- | --- |
+| 2026-11-10 | 仕様書のひな形を作成 |
+| 2026-11-10 | 資料（input/input1.txt）と回答をもとに、入力・出力・描画エンジンの流用・ページ割りの仕様を記載 |
+| 2026-11-10 | 1 ページ 4 × 2 ブロック固定、全テキストを複数行テキスト部品で描画、関数入力によるブロックの複製に変更し、詳細設計を追加 |
+| 2026-11-10 | F-01〜F-06 を実装。行番号の数え方を明記 |

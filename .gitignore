@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 実データの CSV（個人情報保護のためリポジトリに置かない。spec.md 12章）
+input.csv
