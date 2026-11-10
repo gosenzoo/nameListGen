@@ -5,9 +5,13 @@
   <!-- 背景（塗り足し込みで白） -->
   <rect lcdParts="static" x="0" y="0" width="2591" height="3624" fill="#ffffff" />
 
-  <!-- 参加者ブロックの定義（関数入力）。funcArea の左上が呼び出し側 rect の左上に合わせられる -->
+  <!-- 関数呼び出し・funcArea・textArea・textLine の塗りは、配置を確認するための透明度 0.2 の目印（spec.md 7.3）。
+       描画エンジンは描画しないため、プレビューと PNG には出ない。
+       透明度は fill の末尾 2 桁（33）で指定する。opacity 属性は関数呼び出しの展開でブロック全体にコピーされるため使わない -->
+
+  <!-- 参加者ブロックの定義（関数入力）。ブロックの比率は横 85:縦 57.5。funcArea の左上が呼び出し側 rect の左上に合わせられる -->
   <g lcd-funcDef="entryBlock">
-    <rect lcdParts="funcArea" x="0" y="0" width="1130" height="768" />
+    <rect lcdParts="funcArea" x="0" y="0" width="1130" height="764" fill="#80808033" />
 
     <!-- アイコン（25mm 角。正方形でない画像は中央を切り抜く） -->
     <image lcdParts="static" isDraw="$entry.icon" lcd-href="#{$entry.icon}"
@@ -16,35 +20,35 @@
     <!-- 名前（12pt 相当） -->
     <g lcdParts="text" lcdText="#{$entry.name}" lcd-overflow="name"
        lcd-holAlign="left" lcd-verAlign="top" breakType="1">
-      <rect lcdParts="textArea" x="375" y="0" width="755" height="60" />
-      <rect lcdParts="textLine" x="375" y="0" width="755" height="50"
+      <rect lcdParts="textArea" x="375" y="0" width="755" height="60" fill="#00a00033" />
+      <rect lcdParts="textLine" x="375" y="0" width="755" height="50" fill="#ff800033"
             data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "700"}' />
     </g>
 
     <!-- 連絡先（9pt 相当・複数行） -->
     <g lcdParts="text" lcdText="#{$entry.contact}" lcd-overflow="contact"
        lcd-holAlign="left" lcd-verAlign="top" interval="22" breakType="1">
-      <rect lcdParts="textArea" x="375" y="90" width="755" height="255" />
-      <rect lcdParts="textLine" x="375" y="90" width="755" height="38"
+      <rect lcdParts="textArea" x="375" y="90" width="755" height="255" fill="#00a00033" />
+      <rect lcdParts="textLine" x="375" y="90" width="755" height="38" fill="#ff800033"
             data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "400"}' />
     </g>
 
     <!-- あとがき本文（9pt 相当・複数行） -->
     <g lcdParts="text" lcdText="#{$entry.afterword}" lcd-overflow="afterword"
        lcd-holAlign="left" lcd-verAlign="top" interval="22" breakType="1">
-      <rect lcdParts="textArea" x="0" y="375" width="1130" height="393" />
-      <rect lcdParts="textLine" x="0" y="375" width="1130" height="38"
+      <rect lcdParts="textArea" x="0" y="375" width="1130" height="389" fill="#00a00033" />
+      <rect lcdParts="textLine" x="0" y="375" width="1130" height="38" fill="#ff800033"
             data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "400"}' />
     </g>
   </g>
 
   <!-- 8 ブロックの呼び出し（左上から右へ、次の段へ） -->
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[0]" x="110" y="111" width="1130" height="768" />
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[1]" x="1351" y="111" width="1130" height="768" />
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[2]" x="110" y="989" width="1130" height="768" />
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[3]" x="1351" y="989" width="1130" height="768" />
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[4]" x="110" y="1867" width="1130" height="768" />
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[5]" x="1351" y="1867" width="1130" height="768" />
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[6]" x="110" y="2745" width="1130" height="768" />
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[7]" x="1351" y="2745" width="1130" height="768" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[0]" x="110" y="110" width="1130" height="764" fill="#0000ff33" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[1]" x="1351" y="110" width="1130" height="764" fill="#0000ff33" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[2]" x="110" y="990" width="1130" height="764" fill="#0000ff33" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[3]" x="1351" y="990" width="1130" height="764" fill="#0000ff33" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[4]" x="110" y="1870" width="1130" height="764" fill="#0000ff33" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[5]" x="1351" y="1870" width="1130" height="764" fill="#0000ff33" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[6]" x="110" y="2750" width="1130" height="764" fill="#0000ff33" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[7]" x="1351" y="2750" width="1130" height="764" fill="#0000ff33" />
 </svg>

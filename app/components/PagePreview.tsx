@@ -8,9 +8,9 @@ import { PAGE_HEIGHT, PAGE_WIDTH } from "@/lib/render";
 const TRIM = 41; // 仕上がり線（塗り足し 3mm）
 const SAFE = 110; // 安全領域
 const BLOCK_W = 1130;
-const BLOCK_H = 768;
+const BLOCK_H = 764;
 const BLOCK_XS = [110, 1351];
-const BLOCK_YS = [111, 989, 1867, 2745];
+const BLOCK_YS = [110, 990, 1870, 2750];
 
 type Props = {
   pageNumber: number;

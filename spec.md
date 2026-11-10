@@ -156,11 +156,11 @@ type PageDrawParams = {
 
 | 項目 | 値 |
 | --- | --- |
-| ブロックの大きさ | 幅 1130 × 高さ 768 |
+| ブロックの大きさ | 幅 1130 × 高さ 764（横:縦 = 85:57.5。1130 × 57.5 ÷ 85 = 764.4 を切り捨て） |
 | 横の間隔 | 111（ブロック 1130 × 2 + 111 = 2371 = 安全領域の幅） |
-| 縦の間隔 | 110（ブロック 768 × 4 + 110 × 3 = 3402 ≦ 安全領域の高さ 3404） |
+| 縦の間隔 | 116（ブロック 764 × 4 + 116 × 3 = 3404 = 安全領域の高さ） |
 | 列の x 座標 | 左 110、右 1351 |
-| 段の y 座標 | 111, 989, 1867, 2745 |
+| 段の y 座標 | 110, 990, 1870, 2750 |
 
 ### 7.2 参加者ブロック（仮のデザイン）
 
@@ -176,7 +176,7 @@ type PageDrawParams = {
 │あとがき本文（9pt 相当・複数行・折り返し）   │
 │                                             │
 └───────────────────────────────────────────┘
-                                      (1130,768)
+                                      (1130,764)
 ```
 
 | 要素 | 部品 | 位置・大きさ（x, y, 幅, 高さ） | 備考 |
@@ -184,7 +184,7 @@ type PageDrawParams = {
 | アイコン | `<image lcdParts="static">` | 0, 0, 345, 345 | 25mm 角。`preserveAspectRatio="xMidYMid slice"` で中央を切り抜く |
 | 名前 | `lcdParts="text"` | 375, 0, 755, 60 | 1 行ぶんの高さの枠。文字の高さ 50（12pt 相当） |
 | 連絡先 | `lcdParts="text"` | 375, 90, 755, 255 | 文字の高さ 38（9pt 相当）、行間 22 → 4 行まで |
-| あとがき本文 | `lcdParts="text"` | 0, 375, 1130, 393 | 文字の高さ 38（9pt 相当）、行間 22 → 6 行まで |
+| あとがき本文 | `lcdParts="text"` | 0, 375, 1130, 389 | 文字の高さ 38（9pt 相当）、行間 22 → 6 行まで |
 
 - **すべてのテキスト**は、流用元の `infoMessage.svg` のメッセージボックスと同じ `lcdParts="text"`（`TextBlockObj`）で描画する。指定は `breakType="1"`（幅を超えたら折り返す）、`lcd-holAlign="left"`、`lcd-verAlign="top"`。
 - **折り返し**: 流用元のまま（文字単位。禁則処理なし）。
@@ -204,38 +204,51 @@ type PageDrawParams = {
 
   <!-- 参加者ブロックの定義（関数入力）。funcArea の左上が呼び出し側 rect の左上に合わせられる -->
   <g lcd-funcDef="entryBlock">
-    <rect lcdParts="funcArea" x="0" y="0" width="1130" height="768" />
+    <rect lcdParts="funcArea" x="0" y="0" width="1130" height="764" fill="#80808033" />
     <image lcdParts="static" isDraw="$entry.icon" lcd-href="#{$entry.icon}"
            x="0" y="0" width="345" height="345" preserveAspectRatio="xMidYMid slice" />
     <g lcdParts="text" lcdText="#{$entry.name}" lcd-overflow="name"
        lcd-holAlign="left" lcd-verAlign="top" breakType="1">
-      <rect lcdParts="textArea" x="375" y="0" width="755" height="60" />
-      <rect lcdParts="textLine" x="375" y="0" width="755" height="50"
+      <rect lcdParts="textArea" x="375" y="0" width="755" height="60" fill="#00a00033" />
+      <rect lcdParts="textLine" x="375" y="0" width="755" height="50" fill="#ff800033"
             data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "700"}' />
     </g>
     <g lcdParts="text" lcdText="#{$entry.contact}" lcd-overflow="contact"
        lcd-holAlign="left" lcd-verAlign="top" interval="22" breakType="1">
-      <rect lcdParts="textArea" x="375" y="90" width="755" height="255" />
-      <rect lcdParts="textLine" x="375" y="90" width="755" height="38"
+      <rect lcdParts="textArea" x="375" y="90" width="755" height="255" fill="#00a00033" />
+      <rect lcdParts="textLine" x="375" y="90" width="755" height="38" fill="#ff800033"
             data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "400"}' />
     </g>
     <g lcdParts="text" lcdText="#{$entry.afterword}" lcd-overflow="afterword"
        lcd-holAlign="left" lcd-verAlign="top" interval="22" breakType="1">
-      <rect lcdParts="textArea" x="0" y="375" width="1130" height="393" />
-      <rect lcdParts="textLine" x="0" y="375" width="1130" height="38"
+      <rect lcdParts="textArea" x="0" y="375" width="1130" height="389" fill="#00a00033" />
+      <rect lcdParts="textLine" x="0" y="375" width="1130" height="38" fill="#ff800033"
             data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "400"}' />
     </g>
   </g>
 
   <!-- 8 ブロックの呼び出し（並び順は 7.1） -->
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[0]" x="110"  y="111"  width="1130" height="768" />
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[1]" x="1351" y="111"  width="1130" height="768" />
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[2]" x="110"  y="989"  width="1130" height="768" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[0]" x="110"  y="110"  width="1130" height="764" fill="#0000ff33" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[1]" x="1351" y="110"  width="1130" height="764" fill="#0000ff33" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[2]" x="110"  y="990"  width="1130" height="764" fill="#0000ff33" />
   <!-- …entries[7] まで -->
 </svg>
 ```
 
 - 流用元の関数入力は、呼び出し側 rect の属性（`lcd-arg` など）を、展開したブロック内の各要素へコピーする。各要素は自分に付いた `lcd-arg` から `$entry` を受け取る。
+
+#### 配置の目印（透明度 0.2）
+
+- 関数呼び出し（`lcd-funcCall`）・`funcArea`・`textArea`・`textLine` の rect に、透明度 0.2 の塗りを付ける。テンプレートを SVG エディタやブラウザで直接開いたときに、各パーツの配置が見えるようにするための目印（trainLCD のテンプレートと同じ書き方）。
+- これらの rect には `lcdParts="static"` がないため、描画エンジンは描画しない。プレビューと PNG には出ない。
+- 透明度は `fill` の 8 桁カラーコードの末尾 2 桁（`33` = 0.2）で指定する。`opacity` / `fill-opacity` 属性は使わない。関数入力の展開では、呼び出し側 rect の属性のうち `x`・`y`・`width`・`height`・`fill` 以外が展開後の全要素にコピーされるため、`opacity` を付けるとブロック全体が薄く描画されてしまう。
+
+| パーツ | 色（透明度 0.2） |
+| --- | --- |
+| 関数呼び出し（`lcd-funcCall`） | 青 `#0000ff33` |
+| `funcArea` | 灰 `#80808033` |
+| `textArea` | 緑 `#00a00033` |
+| `textLine` | 橙 `#ff800033` |
 
 ## 8. 描画エンジンの流用（詳細）
 
@@ -368,3 +381,4 @@ lib/exportPng.ts   exportPng(svg, pageNumber)
 | 2026-11-10 | 資料（input/input1.txt）と回答をもとに、入力・出力・描画エンジンの流用・ページ割りの仕様を記載 |
 | 2026-11-10 | 1 ページ 4 × 2 ブロック固定、全テキストを複数行テキスト部品で描画、関数入力によるブロックの複製に変更し、詳細設計を追加 |
 | 2026-11-10 | F-01〜F-06 を実装。行番号の数え方を明記 |
+| 2026-11-11 | ブロックの比率を横 85:縦 57.5 に変更（1130 × 764）。テンプレートの各パーツに透明度 0.2 の配置の目印を追加 |
