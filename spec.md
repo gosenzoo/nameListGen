@@ -181,7 +181,7 @@ type PageDrawParams = {
 
 | 要素 | 部品 | 位置・大きさ（x, y, 幅, 高さ） | 備考 |
 | --- | --- | --- | --- |
-| アイコン | `<image lcdParts="static">` | 0, 0, 345, 345 | 25mm 角。`preserveAspectRatio="xMidYMid slice"` で中央を切り抜く |
+| アイコン | `<image lcdParts="static">` | 0, 0, 345, 345 | 25mm 角の四角に内接する円（直径 345）で表示する。`preserveAspectRatio="xMidYMid slice"` で正方形に切り抜いたうえで、`clip-path` で円形に切り抜く |
 | 名前 | `lcdParts="text"` | 375, 0, 755, 60 | 1 行ぶんの高さの枠。文字の高さ 50（12pt 相当） |
 | 連絡先 | `lcdParts="text"` | 375, 90, 755, 255 | 文字の高さ 38（9pt 相当）、行間 22 → 4 行まで |
 | あとがき本文 | `lcdParts="text"` | 0, 375, 1130, 389 | 文字の高さ 38（9pt 相当）、行間 22 → 6 行まで |
@@ -199,6 +199,13 @@ type PageDrawParams = {
 
 ```xml
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2591 3624" width="2591" height="3624">
+  <defs>
+    <!-- アイコンを円形に切り抜く。objectBoundingBox 指定なので、画像自身の四角に内接する円になる -->
+    <clipPath id="iconClip" clipPathUnits="objectBoundingBox">
+      <circle cx="0.5" cy="0.5" r="0.5" />
+    </clipPath>
+  </defs>
+
   <!-- 背景（塗り足し込みで白） -->
   <rect lcdParts="static" x="0" y="0" width="2591" height="3624" fill="#ffffff" />
 
@@ -206,7 +213,8 @@ type PageDrawParams = {
   <g lcd-funcDef="entryBlock">
     <rect lcdParts="funcArea" x="0" y="0" width="1130" height="764" fill="#80808033" />
     <image lcdParts="static" isDraw="$entry.icon" lcd-href="#{$entry.icon}"
-           x="0" y="0" width="345" height="345" preserveAspectRatio="xMidYMid slice" />
+           x="0" y="0" width="345" height="345" preserveAspectRatio="xMidYMid slice"
+           clip-path="url(#iconClip)" />
     <g lcdParts="text" lcdText="#{$entry.name}" lcd-overflow="name"
        lcd-holAlign="left" lcd-verAlign="top" breakType="1">
       <rect lcdParts="textArea" x="375" y="0" width="755" height="60" fill="#00a00033" />
@@ -236,6 +244,13 @@ type PageDrawParams = {
 ```
 
 - 流用元の関数入力は、呼び出し側 rect の属性（`lcd-arg` など）を、展開したブロック内の各要素へコピーする。各要素は自分に付いた `lcd-arg` から `$entry` を受け取る。
+
+#### アイコンの円形の切り抜き
+
+- 切り抜きの形（`clipPath`）はテンプレートの `<defs>` に 1 つだけ定義し、8 ブロックのアイコンで共有する。
+- `clipPathUnits="objectBoundingBox"` にすると、円の位置と大きさが画像自身の四角（x, y, 幅, 高さ）に対する割合になる。関数呼び出しでブロックを別の位置に複製しても、それぞれのアイコンの四角に内接する円で切り抜かれる。
+- `<defs>` は描画エンジンがページの SVG にそのまま複製する（流用元の仕組み）。PNG 書き出しも同じ SVG を使うため、プレビューと PNG の両方が円形になる。
+- 描画エンジンとアプリのコードは変更しない（テンプレートだけの変更）。
 
 #### 配置の目印（透明度 0.2）
 
@@ -382,3 +397,4 @@ lib/exportPng.ts   exportPng(svg, pageNumber)
 | 2026-11-10 | 1 ページ 4 × 2 ブロック固定、全テキストを複数行テキスト部品で描画、関数入力によるブロックの複製に変更し、詳細設計を追加 |
 | 2026-11-10 | F-01〜F-06 を実装。行番号の数え方を明記 |
 | 2026-11-11 | ブロックの比率を横 85:縦 57.5 に変更（1130 × 764）。テンプレートの各パーツに透明度 0.2 の配置の目印を追加 |
+| 2026-11-11 | アイコンを四角に内接する円形で表示するよう変更 |

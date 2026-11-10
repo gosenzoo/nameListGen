@@ -2,8 +2,15 @@
   <!-- あとがきリスト 1 ページ分のテンプレート（spec.md 7.3）
        B5 + 塗り足し 3mm（188 x 263 mm）を 350dpi で 2591 x 3624 px として扱う -->
 
+  <defs>
+    <!-- アイコンを円形に切り抜く（spec.md 7.3）。objectBoundingBox 指定なので、画像自身の四角に内接する円になる -->
+    <clipPath id="iconClip" clipPathUnits="objectBoundingBox">
+      <circle cx="0.5" cy="0.5" r="0.5" />
+    </clipPath>
+  </defs>
+
   <!-- 背景（塗り足し込みで白） -->
-  <rect lcdParts="static" x="0" y="0" width="2591" height="3624" fill="#ffffff" />
+  <rect lcdParts="static" x="0" y="0" width="2591" height="3624" fill="#d3d3d3" />
 
   <!-- 関数呼び出し・funcArea・textArea・textLine の塗りは、配置を確認するための透明度 0.2 の目印（spec.md 7.3）。
        描画エンジンは描画しないため、プレビューと PNG には出ない。
@@ -12,10 +19,13 @@
   <!-- 参加者ブロックの定義（関数入力）。ブロックの比率は横 85:縦 57.5。funcArea の左上が呼び出し側 rect の左上に合わせられる -->
   <g lcd-funcDef="entryBlock">
     <rect lcdParts="funcArea" x="0" y="0" width="1130" height="764" fill="#80808033" />
+    <rect lcdParts="static" x="0" y="0" width="1130" height="764" fill="#bcfcf9" />
+    <rect lcdParts="static" x="0" y="450" width="1130" height="150" fill="#89fff9" />
 
-    <!-- アイコン（25mm 角。正方形でない画像は中央を切り抜く） -->
+    <!-- アイコン（25mm 角の四角に内接する円。正方形でない画像は中央を正方形に切り抜いてから円形にする） -->
     <image lcdParts="static" isDraw="$entry.icon" lcd-href="#{$entry.icon}"
-           x="0" y="0" width="345" height="345" preserveAspectRatio="xMidYMid slice" />
+           x="0" y="0" width="345" height="345" preserveAspectRatio="xMidYMid slice"
+           clip-path="url(#iconClip)" />
 
     <!-- 名前（12pt 相当） -->
     <g lcdParts="text" lcdText="#{$entry.name}" lcd-overflow="name"
