@@ -1,16 +1,44 @@
 "use client";
 
-// あとがきリスト生成の画面（spec.md 4章）
-// CSV 選択 → プレビュー → ダウンロード の単一画面
-import { useState } from "react";
+// あとがきリスト生成のメイン画面（spec.md 4章）
+// CSV 選択 → プレビュー → ダウンロード。テンプレートの選択と、テンプレート編集画面への遷移もここから行う
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import FileSelector from "./components/FileSelector";
 import MessageList from "./components/MessageList";
 import PagePreview from "./components/PagePreview";
+import TemplateSelector, { BUILTIN_VALUE } from "./components/TemplateSelector";
 import { parseCsvFile } from "@/lib/csv";
 import { exportAllPngs, exportPng } from "@/lib/exportPng";
 import { paginate } from "@/lib/paginate";
 import { renderPages } from "@/lib/render";
-import type { ParseResult, RenderedPage } from "@/lib/types";
+import {
+  isStoreConfigured,
+  listTemplates,
+  loadTemplateSvg,
+  type StoredTemplateSummary,
+  type TemplateRef,
+} from "@/lib/templateStore";
+import type { Participant, ParseResult, RenderedPage } from "@/lib/types";
+
+// 選んだテンプレートを覚えておく localStorage のキー
+const TEMPLATE_STORAGE_KEY = "nameListGen.templateId";
+
+// localStorage の読み書き（使えない環境でも動くよう、失敗は無視する）
+function readSavedTemplate(): string {
+  try {
+    return localStorage.getItem(TEMPLATE_STORAGE_KEY) ?? BUILTIN_VALUE;
+  } catch {
+    return BUILTIN_VALUE;
+  }
+}
+function writeSavedTemplate(value: string) {
+  try {
+    localStorage.setItem(TEMPLATE_STORAGE_KEY, value);
+  } catch {
+    // 保存できなくても選択自体は使える
+  }
+}
 
 export default function Home() {
   const [fileName, setFileName] = useState<string | null>(null);
@@ -20,6 +48,43 @@ export default function Home() {
   const [exporting, setExporting] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // テンプレートの選択（F-07）
+  const [templateValue, setTemplateValue] = useState(BUILTIN_VALUE);
+  const [templates, setTemplates] = useState<StoredTemplateSummary[]>([]);
+  const [storeMessage, setStoreMessage] = useState<string | null>(null);
+
+  // 保存済みテンプレートの一覧を取得し、前回選んだテンプレートを復元する
+  useEffect(() => {
+    (async () => {
+      const saved = readSavedTemplate();
+      if (!isStoreConfigured()) {
+        setStoreMessage("Supabase の接続情報が未設定のため、標準（組み込み）のテンプレートだけを使えます");
+        return;
+      }
+      try {
+        const list = await listTemplates();
+        setTemplates(list);
+        // 前回のテンプレートが削除されていたら組み込みに戻す
+        setTemplateValue(list.some((t) => t.id === saved) ? saved : BUILTIN_VALUE);
+      } catch (e) {
+        setStoreMessage(
+          `Supabase に接続できなかったため、標準（組み込み）のテンプレートだけを使えます（${e instanceof Error ? e.message : String(e)}）`,
+        );
+      }
+    })();
+  }, []);
+
+  // 選択欄の値をテンプレートの参照に変換する
+  const toTemplateRef = (value: string): TemplateRef => {
+    const found = templates.find((t) => t.id === value);
+    return found ? { kind: "stored", id: found.id, name: found.name } : { kind: "builtin" };
+  };
+
+  // 参加者をページ割りし、テンプレートで描画する
+  const render = async (participants: Participant[], value: string) => {
+    const templateSvg = await loadTemplateSvg(toTemplateRef(value));
+    setPages(await renderPages(paginate(participants), templateSvg));
+  };
 
   // CSV を読み込み、ページ割りと描画まで行う
   const handleSelect = async (file: File) => {
@@ -31,7 +96,23 @@ export default function Home() {
     try {
       const result = await parseCsvFile(file);
       setParseResult(result);
-      setPages(await renderPages(paginate(result.participants)));
+      await render(result.participants, templateValue);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // テンプレートを選び直したら、読み込み済みの CSV を描画し直す
+  const handleTemplateChange = async (value: string) => {
+    setTemplateValue(value);
+    writeSavedTemplate(value);
+    if (!parseResult) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await render(parseResult.participants, value);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -63,6 +144,23 @@ export default function Home() {
         <FileSelector disabled={loading || exporting} onSelect={handleSelect} />
         {fileName && <span className="text-sm text-zinc-600">{fileName}</span>}
         {loading && <span className="text-sm">読み込み中…</span>}
+      </div>
+
+      {/* テンプレート編集画面への遷移と、PNG 生成に使うテンプレートの選択 */}
+      <div className="flex flex-col items-start gap-3">
+        <Link
+          href="/template-editor"
+          className="rounded border border-blue-600 px-4 py-2 text-blue-700 hover:bg-blue-50"
+        >
+          テンプレート編集
+        </Link>
+        <TemplateSelector
+          value={templateValue}
+          templates={templates}
+          disabled={loading || exporting}
+          onChange={handleTemplateChange}
+        />
+        {storeMessage && <p className="text-sm text-zinc-600">{storeMessage}</p>}
       </div>
 
       {error && <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</p>}

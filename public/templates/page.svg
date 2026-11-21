@@ -22,39 +22,40 @@
     <rect lcdParts="static" x="0" y="0" width="1130" height="764" fill="#bcfcf9" />
     <rect lcdParts="static" x="0" y="450" width="1130" height="150" fill="#89fff9" />
 
+    <rect x="50" y="50" width="250" height="250" fill="#80808033" />
     <!-- アイコン（25mm 角の四角に内接する円。正方形でない画像は中央を正方形に切り抜いてから円形にする） -->
     <image lcdParts="static" isDraw="$entry.icon" lcd-href="#{$entry.icon}"
-           x="0" y="0" width="345" height="345" preserveAspectRatio="xMidYMid slice"
+           x="50" y="50" width="250" height="250" preserveAspectRatio="xMidYMid slice"
            clip-path="url(#iconClip)" />
 
     <!-- 名前（12pt 相当） -->
     <g lcdParts="text" lcdText="#{$entry.name}" lcd-overflow="name"
        lcd-holAlign="left" lcd-verAlign="top" breakType="1">
-      <rect lcdParts="textArea" x="375" y="0" width="755" height="60" fill="#00a00033" />
-      <rect lcdParts="textLine" x="375" y="0" width="755" height="50" fill="#ff800033"
+      <rect lcdParts="textArea" x="375" y="50" width="705" height="80" fill="#00a00033" />
+      <rect lcdParts="textLine" x="375" y="50" width="705" height="80" fill="#ff800033"
             data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "700"}' />
     </g>
 
     <!-- 連絡先（9pt 相当・複数行） -->
     <g lcdParts="text" lcdText="#{$entry.contact}" lcd-overflow="contact"
-       lcd-holAlign="left" lcd-verAlign="top" interval="22" breakType="1">
-      <rect lcdParts="textArea" x="375" y="90" width="755" height="255" fill="#00a00033" />
-      <rect lcdParts="textLine" x="375" y="90" width="755" height="38" fill="#ff800033"
+       lcd-holAlign="left" lcd-verAlign="top" interval="10" breakType="1">
+      <rect lcdParts="textArea" x="375" y="150" width="705" height="160" fill="#00a00033" />
+      <rect lcdParts="textLine" x="375" y="150" width="705" height="50" fill="#ff800033"
             data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "400"}' />
     </g>
 
     <!-- あとがき本文（9pt 相当・複数行） -->
     <g lcdParts="text" lcdText="#{$entry.afterword}" lcd-overflow="afterword"
-       lcd-holAlign="left" lcd-verAlign="top" interval="22" breakType="1">
-      <rect lcdParts="textArea" x="0" y="375" width="1130" height="389" fill="#00a00033" />
-      <rect lcdParts="textLine" x="0" y="375" width="1130" height="38" fill="#ff800033"
+       lcd-holAlign="left" lcd-verAlign="top" interval="10" breakType="1">
+      <rect lcdParts="textArea" x="50" y="325" width="1030" height="400" fill="#00a00033" />
+      <rect lcdParts="textLine" x="50" y="325" width="1030" height="38" fill="#ff800033"
             data-style='{"fontFamily": "BIZ UDGothic", "fontWeight": "400"}' />
     </g>
   </g>
 
   <!-- 8 ブロックの呼び出し（左上から右へ、次の段へ） -->
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[0]" x="110" y="110" width="1130" height="764" fill="#0000ff33" />
-  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[1]" x="1351" y="110" width="1130" height="764" fill="#0000ff33" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[0]" x="110" y="110" width="1130" height="764" fill="#6e6e6e00" />
+  <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[1]" x="1351" y="110" width="1130" height="764" fill="#42426333" />
   <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[2]" x="110" y="990" width="1130" height="764" fill="#0000ff33" />
   <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[3]" x="1351" y="990" width="1130" height="764" fill="#0000ff33" />
   <rect lcd-funcCall="entryBlock" lcd-arg="entry:entries[4]" x="110" y="1870" width="1130" height="764" fill="#0000ff33" />

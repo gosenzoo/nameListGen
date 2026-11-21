@@ -2,15 +2,17 @@
 
 // 1 ページ分のプレビュー（ガイド表示・保存ボタンつき。spec.md 4章）
 import { useEffect, useRef } from "react";
-import { PAGE_HEIGHT, PAGE_WIDTH } from "@/lib/render";
-
-// ガイドの位置（spec.md 6章・7.1）
-const TRIM = 41; // 仕上がり線（塗り足し 3mm）
-const SAFE = 110; // 安全領域
-const BLOCK_W = 1130;
-const BLOCK_H = 764;
-const BLOCK_XS = [110, 1351];
-const BLOCK_YS = [110, 990, 1870, 2750];
+// ガイドの位置（spec.md 6章・7.1）。寸法は lib/layout.ts にまとめてある
+import {
+  BLOCK_HEIGHT as BLOCK_H,
+  BLOCK_WIDTH as BLOCK_W,
+  BLOCK_XS,
+  BLOCK_YS,
+  PAGE_HEIGHT,
+  PAGE_WIDTH,
+  SAFE, // 安全領域
+  TRIM, // 仕上がり線（塗り足し 3mm）
+} from "@/lib/layout";
 
 type Props = {
   pageNumber: number;
