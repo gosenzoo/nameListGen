@@ -14,6 +14,8 @@ export function partLabel(part: TemplatePart): string {
       return "塗り";
     case "icon":
       return "アイコン";
+    case "image":
+      return "画像";
     case "text":
       return part.content === "fixed"
         ? `テキスト「${part.fixedText.split("\n")[0].slice(0, 10)}」`

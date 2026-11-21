@@ -1,6 +1,8 @@
 "use client";
 
 // パーツ一覧（追加ボタン・ページ背景色つき。spec.md 14.2）
+import { useRef } from "react";
+import { IMAGE_ACCEPT } from "@/lib/imageFile";
 import type { TemplatePart } from "@/lib/templateModel";
 import { partLabel } from "../partLabel";
 import { ColorField } from "./Fields";
@@ -10,11 +12,14 @@ type Props = {
   selectedId: string | null;
   pageBackground: string;
   onSelect: (id: string) => void;
-  onAdd: (kind: TemplatePart["kind"]) => void;
+  onAdd: (kind: Exclude<TemplatePart["kind"], "image">) => void;
+  onAddImage: (file: File) => void; // 「＋画像」で画像ファイルを選んだとき
   onPageBackgroundChange: (color: string) => void;
 };
 
-export default function PartList({ parts, selectedId, pageBackground, onSelect, onAdd, onPageBackgroundChange }: Props) {
+export default function PartList({ parts, selectedId, pageBackground, onSelect, onAdd, onAddImage, onPageBackgroundChange }: Props) {
+  // 「＋画像」で開くファイル選択（画像を選んだ時点でパーツを追加する。spec.md 14.3.1）
+  const fileRef = useRef<HTMLInputElement>(null);
   return (
     <div className="flex flex-col gap-4">
       <section>
@@ -47,6 +52,21 @@ export default function PartList({ parts, selectedId, pageBackground, onSelect, 
           <button type="button" className="rounded border border-zinc-400 px-2 py-1 hover:bg-zinc-100" onClick={() => onAdd("icon")}>
             ＋アイコン
           </button>
+          <button type="button" className="rounded border border-zinc-400 px-2 py-1 hover:bg-zinc-100" onClick={() => fileRef.current?.click()}>
+            ＋画像
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept={IMAGE_ACCEPT}
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              // 同じファイルをもう一度選べるように空にしておく
+              e.target.value = "";
+              if (file) onAddImage(file);
+            }}
+          />
         </div>
       </section>
 

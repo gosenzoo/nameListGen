@@ -50,6 +50,31 @@ function resizePart(part: TemplatePart, dir: HandleDir, dx: number, dy: number):
       y: dir.includes("n") ? part.y + (part.size - size) : part.y,
     };
   }
+  if (part.kind === "image" && part.keepAspect) {
+    // 画像（縦横比を保つ）: ドラッグ開始時の幅 : 高さを保つ（spec.md 14.3.1）
+    const ratio = part.width / part.height;
+    const dw = dir.includes("e") ? dx : dir.includes("w") ? -dx : 0;
+    const dh = dir.includes("s") ? dy : dir.includes("n") ? -dy : 0;
+    // 四隅は動かした量の大きい方の辺、各辺の中央はその辺に合わせて、もう一方を決める
+    const byWidth = dir.length === 2 ? Math.abs(dw) >= Math.abs(dh) : dir === "e" || dir === "w";
+    let width: number;
+    let height: number;
+    if (byWidth) {
+      width = Math.max(1, part.width + dw);
+      height = Math.max(1, Math.round(width / ratio));
+    } else {
+      height = Math.max(1, part.height + dh);
+      width = Math.max(1, Math.round(height * ratio));
+    }
+    return {
+      ...part,
+      width,
+      height,
+      // 左・上のハンドルのときは、反対側の辺を固定する
+      x: dir.includes("w") ? part.x + (part.width - width) : part.x,
+      y: dir.includes("n") ? part.y + (part.height - height) : part.y,
+    };
+  }
   let { x, y, width, height } = part;
   if (dir.includes("e")) width = Math.max(1, part.width + dx);
   if (dir.includes("s")) height = Math.max(1, part.height + dy);

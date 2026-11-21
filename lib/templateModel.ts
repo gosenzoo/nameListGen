@@ -26,6 +26,18 @@ export type IconPart = {
   circle: boolean; // 円形に切り抜くか
 };
 
+// 画像（固定）パーツ（spec.md 14.3.1）。全ブロックに同じ画像を表示する
+export type ImagePart = {
+  id: string;
+  kind: "image";
+  href: string; // 画像の data URL（base64）
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  keepAspect: boolean; // 縦横比を保って大きさを変えるか（data-keep-aspect）
+};
+
 export type TextPart = {
   id: string;
   kind: "text";
@@ -42,7 +54,7 @@ export type TextPart = {
   align: TextAlign;
 };
 
-export type TemplatePart = RectPart | IconPart | TextPart;
+export type TemplatePart = RectPart | IconPart | ImagePart | TextPart;
 
 export type TemplateModel = {
   pageBackground: string; // ページの背景色
@@ -159,6 +171,24 @@ export function parseTemplate(svgText: string): ParsedTemplate {
             height: num(child, "height"),
             fill: child.getAttribute("fill") || "#000000",
           });
+        } else if (p === "static" && childTag === "image" && !child.hasAttribute("lcd-href")) {
+          // lcd-href がなく、href が data URL の画像は画像（固定）パーツ（spec.md 14.3.1）
+          const href = child.getAttribute("href") ?? child.getAttribute("xlink:href") ?? "";
+          if (href.startsWith("data:")) {
+            parts.push({
+              id: newPartId(),
+              kind: "image",
+              href,
+              x: num(child, "x"),
+              y: num(child, "y"),
+              width: num(child, "width"),
+              height: num(child, "height"),
+              // 属性がない場合はオンとして読む
+              keepAspect: child.getAttribute("data-keep-aspect") !== "0",
+            });
+          } else {
+            unsupported++;
+          }
         } else if (p === "static" && childTag === "image") {
           parts.push({
             id: newPartId(),
@@ -215,6 +245,12 @@ function buildPart(part: TemplatePart): string {
     <image lcdParts="static" isDraw="$entry.icon" lcd-href="#{$entry.icon}"
            x="${attr(part.x)}" y="${attr(part.y)}" width="${attr(part.size)}" height="${attr(part.size)}" preserveAspectRatio="xMidYMid slice"${clip} />`;
     }
+    case "image":
+      // 画像は常に枠いっぱいに拡大縮小する（preserveAspectRatio="none"。spec.md 14.3.1）
+      return `    <!-- 画像（固定） -->
+    <image lcdParts="static" href="${attr(part.href)}"
+           x="${attr(part.x)}" y="${attr(part.y)}" width="${attr(part.width)}" height="${attr(part.height)}" preserveAspectRatio="none"
+           data-keep-aspect="${part.keepAspect ? "1" : "0"}" />`;
     case "text": {
       const content = part.content;
       const isFixed = content === "fixed";
@@ -275,7 +311,8 @@ ${calls}
 
 // ---- 新しいパーツの既定値 ----
 
-export function createPart(kind: TemplatePart["kind"]): TemplatePart {
+// 画像（固定）は読み込んだ画像が必要なので createImagePart で作る
+export function createPart(kind: Exclude<TemplatePart["kind"], "image">): TemplatePart {
   switch (kind) {
     case "rect":
       return { id: newPartId(), kind, x: 0, y: 0, width: 300, height: 150, fill: "#e5e7eb" };
@@ -298,4 +335,9 @@ export function createPart(kind: TemplatePart["kind"]): TemplatePart {
         align: "left",
       };
   }
+}
+
+// 読み込んだ画像から画像（固定）パーツを作る。大きさは画像の元の大きさ（spec.md 14.3.1）
+export function createImagePart(image: { href: string; width: number; height: number }): ImagePart {
+  return { id: newPartId(), kind: "image", href: image.href, x: 0, y: 0, width: image.width, height: image.height, keepAspect: true };
 }

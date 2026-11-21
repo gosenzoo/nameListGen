@@ -9,6 +9,7 @@ import PartList from "./components/PartList";
 import PropertyPanel from "./components/PropertyPanel";
 import {
   buildTemplateSvg,
+  createImagePart,
   createPart,
   parseTemplate,
   type TemplateModel,
@@ -25,6 +26,7 @@ import {
   type StoredTemplateSummary,
   type TemplateRef,
 } from "@/lib/templateStore";
+import { loadImageFile } from "@/lib/imageFile";
 
 // 元に戻せる操作の数（spec.md 14.4）
 const HISTORY_LIMIT = 50;
@@ -166,6 +168,31 @@ export default function TemplateEditorPage() {
 
   const selectedIndex = model ? model.parts.findIndex((p) => p.id === selectedId) : -1;
   const selectedPart = model && selectedIndex >= 0 ? model.parts[selectedIndex] : null;
+
+  // 「＋画像」で選んだ画像ファイルからパーツを追加する（spec.md 14.3.1）
+  const addImage = async (file: File) => {
+    if (!model) return;
+    setError(null);
+    try {
+      const part = createImagePart(await loadImageFile(file));
+      applyModel({ ...model, parts: [...model.parts, part] });
+      setSelectedId(part.id);
+    } catch (e) {
+      setError(messageOf(e));
+    }
+  };
+
+  // 選択中の画像（固定）を差し替える。位置と「縦横比を保つ」はそのまま、大きさは新しい画像の元の大きさにする
+  const replaceImage = async (file: File) => {
+    if (!selectedPart || selectedPart.kind !== "image") return;
+    setError(null);
+    try {
+      const { href, width, height } = await loadImageFile(file);
+      replacePart({ ...selectedPart, href, width, height });
+    } catch (e) {
+      setError(messageOf(e));
+    }
+  };
 
   // 重なり順を 1 つ動かす（offset: +1 で前面へ、-1 で背面へ）
   const movePartOrder = (offset: number) => {
@@ -393,6 +420,7 @@ export default function TemplateEditorPage() {
               applyModel({ ...model, parts: [...model.parts, part] });
               setSelectedId(part.id);
             }}
+            onAddImage={(file) => void addImage(file)}
             onPageBackgroundChange={(pageBackground) => applyModel({ ...model, pageBackground })}
           />
 
@@ -424,6 +452,7 @@ export default function TemplateEditorPage() {
             onChange={(part) => replacePart(part)}
             onMoveForward={() => movePartOrder(1)}
             onMoveBackward={() => movePartOrder(-1)}
+            onReplaceImage={(file) => void replaceImage(file)}
             onDelete={() => {
               applyModel({ ...model, parts: model.parts.filter((p) => p.id !== selectedId) });
               setSelectedId(null);
