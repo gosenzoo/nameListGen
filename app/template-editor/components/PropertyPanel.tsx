@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { dataUrlBytes, IMAGE_ACCEPT } from "@/lib/imageFile";
 import {
   ARRANGE_COUNT_MAX,
+  arrangeGaps,
   type ArrangeItem,
   type BlockItem,
   type FontWeight,
@@ -304,11 +305,39 @@ function ArrangeProperties({
 }) {
   // 列数・行数は 1〜100、かつ列数 × 行数が 100 以下（spec.md 19.2）
   const tooMany = part.columns * part.rows > ARRANGE_COUNT_MAX;
+  // 範囲にフィットさせたときの間隔（表示のみ。spec.md 19.3・19.5）
+  const gaps = arrangeGaps(part);
+  const gapText = (gap: number | null) => (gap === null ? "—" : String(gap));
+
+  // ブロックの大きさの入力。縦横比を保つときは、入力欄を選んだ時点の比でもう一方を計算する（SizeFields と同じ。spec.md 19.2）
+  const ratioRef = useRef<number | null>(null);
+  const rememberRatio = () => {
+    ratioRef.current = part.blockWidth / part.blockHeight;
+  };
+  const changeBlockWidth = (blockWidth: number) => {
+    const ratio = ratioRef.current ?? part.blockWidth / part.blockHeight;
+    const blockHeight = part.keepAspect ? Math.max(1, Math.round(blockWidth / ratio)) : part.blockHeight;
+    onChange({ ...part, blockWidth, blockHeight });
+  };
+  const changeBlockHeight = (blockHeight: number) => {
+    const ratio = ratioRef.current ?? part.blockWidth / part.blockHeight;
+    const blockWidth = part.keepAspect ? Math.max(1, Math.round(blockHeight * ratio)) : part.blockWidth;
+    onChange({ ...part, blockWidth, blockHeight });
+  };
+
   return (
     <>
       <div className="grid grid-cols-2 gap-2">
         <NumberField label="範囲の幅" value={part.width} min={1} onChange={(width) => onChange({ ...part, width })} />
         <NumberField label="範囲の高さ" value={part.height} min={1} onChange={(height) => onChange({ ...part, height })} />
+        <NumberField label="ブロックの幅" value={part.blockWidth} min={1} onChange={changeBlockWidth} onFocus={rememberRatio} />
+        <NumberField label="ブロックの高さ" value={part.blockHeight} min={1} onChange={changeBlockHeight} onFocus={rememberRatio} />
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={part.keepAspect} onChange={(e) => onChange({ ...part, keepAspect: e.target.checked })} />
+        縦横比を保つ
+      </label>
+      <div className="grid grid-cols-2 gap-2">
         <NumberField
           label="列数"
           value={part.columns}
@@ -321,21 +350,15 @@ function ArrangeProperties({
           min={1}
           onChange={(rows) => onChange({ ...part, rows: Math.min(ARRANGE_COUNT_MAX, rows) })}
         />
-        <NumberField label="列間隔" value={part.gapX} min={0} onChange={(gapX) => onChange({ ...part, gapX })} />
-        <NumberField label="行間隔" value={part.gapY} min={0} onChange={(gapY) => onChange({ ...part, gapY })} />
       </div>
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={part.keepAspect} onChange={(e) => onChange({ ...part, keepAspect: e.target.checked })} />
-        縦横比を保つ（ブロックの基準サイズと同じ縦横比）
-      </label>
-      <p className="text-xs text-zinc-600">並び順: 横優先（左上から右へ、次の行へ）</p>
+      <p className="text-xs text-zinc-600">並び順: 横優先（左上から右へ、次の行へ）。範囲にフィットするように間隔を決めます</p>
       {tooMany ? (
         <p className="text-sm text-red-700">ブロック数（列数 × 行数）は {ARRANGE_COUNT_MAX} 以下にしてください</p>
       ) : blocks.length === 0 ? (
-        <p className="text-sm text-red-700">範囲に収まりません。範囲を広げるか、間隔・列数・行数を減らしてください</p>
+        <p className="text-sm text-red-700">範囲に収まりません。範囲を広げるか、ブロックの大きさ・列数・行数を減らしてください</p>
       ) : (
         <p className="text-xs text-zinc-600">
-          ブロックの大きさ: {blocks[0].width} × {blocks[0].height}（{blocks.length} 個）
+          列間隔: {gapText(gaps?.gapX ?? null)} / 行間隔: {gapText(gaps?.gapY ?? null)}（{blocks.length} 個）
         </p>
       )}
       <button

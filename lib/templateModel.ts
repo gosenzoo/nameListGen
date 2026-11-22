@@ -67,7 +67,8 @@ export type BlockItem = {
   keepAspect: boolean; // 縦横比を保って大きさを変えるか（data-keep-aspect）
 };
 
-// ブロックの等間隔配置（spec.md 19章）。範囲の中にブロックを列数 × 行数の格子状に並べる（常に横優先）
+// ブロックの等間隔配置（spec.md 19章）。範囲の中に、指定した大きさのブロックを列数 × 行数の格子状に、
+// 範囲にフィットするように（両端揃えで）並べる（常に横優先）
 export type ArrangeItem = {
   id: string;
   kind: "arrange";
@@ -75,11 +76,11 @@ export type ArrangeItem = {
   y: number;
   width: number;
   height: number;
+  blockWidth: number; // ブロック 1 つの大きさ
+  blockHeight: number;
   columns: number; // 列数
   rows: number; // 行数
-  gapX: number; // 列間隔
-  gapY: number; // 行間隔
-  keepAspect: boolean; // ブロックの縦横比を基準サイズと同じにするか（data-keep-aspect）
+  keepAspect: boolean; // ブロックの大きさの入力で縦横比を保つか（data-keep-aspect。spec.md 19.2）
 };
 
 // ページ上の要素（spec.md 18.2・19.6）。テキストは content が "fixed" のものだけ
@@ -104,29 +105,37 @@ export const ARRANGE_COUNT_MAX = 100;
 // 小数第 2 位で四捨五入する（spec.md 19.3）
 const round2 = (v: number) => Math.round(v * 100) / 100;
 
+// 範囲の長さ・ブロックの長さ・個数から、1 方向の並べ方を求める（spec.md 19.3）
+// 両端揃え: 最初のブロックは範囲の端に、最後のブロックは反対の端に接し、間隔は等しい
+// 個数が 1 のときは中央に置く（間隔は null）。収まらないときは null
+function fitAxis(range: number, size: number, count: number): { start: number; gap: number | null } | null {
+  // 小数の誤差で「ちょうど収まる」指定を落とさないよう、わずかに余裕をみる
+  if (!(size >= 1) || size * count > range + 1e-6) return null;
+  if (count === 1) return { start: (range - size) / 2, gap: null };
+  return { start: 0, gap: Math.max(0, (range - size * count) / (count - 1)) };
+}
+
+// 等間隔配置の、計算した列間隔・行間隔（spec.md 19.5 のプロパティ欄の表示用）
+// 列数・行数が 1 のほうは null。収まらないときは null を返す
+export function arrangeGaps(item: ArrangeItem): { gapX: number | null; gapY: number | null } | null {
+  const fx = fitAxis(item.width, item.blockWidth, item.columns);
+  const fy = fitAxis(item.height, item.blockHeight, item.rows);
+  if (!fx || !fy) return null;
+  return {
+    gapX: fx.gap === null ? null : round2(fx.gap),
+    gapY: fy.gap === null ? null : round2(fy.gap),
+  };
+}
+
 // 等間隔配置の中のブロックの位置と大きさを計算する（spec.md 19.3。横優先）
-// 枠が 1 未満になる指定や、ブロック数が上限を超える指定のときは空の配列（ブロックを置かない）
+// 範囲に収まらない指定や、ブロック数が上限を超える指定のときは空の配列（ブロックを置かない）
 // id は「等間隔配置の id-番号」（画面上の識別用）
-export function arrangeBlocks(
-  item: ArrangeItem,
-  model: Pick<TemplateModel, "blockWidth" | "blockHeight">,
-): BlockItem[] {
+export function arrangeBlocks(item: ArrangeItem): BlockItem[] {
   const { columns, rows } = item;
   if (columns < 1 || rows < 1 || columns * rows > ARRANGE_COUNT_MAX) return [];
-  const cellW = (item.width - item.gapX * (columns - 1)) / columns;
-  const cellH = (item.height - item.gapY * (rows - 1)) / rows;
-  if (!(cellW >= 1 && cellH >= 1)) return [];
-
-  // 縦横比を保つときは、基準サイズの縦横比で枠に収まる最大の大きさにし、枠の中央に寄せる
-  let blockW = cellW;
-  let blockH = cellH;
-  if (item.keepAspect && model.blockWidth > 0 && model.blockHeight > 0) {
-    const scale = Math.min(cellW / model.blockWidth, cellH / model.blockHeight);
-    blockW = model.blockWidth * scale;
-    blockH = model.blockHeight * scale;
-  }
-  const offsetX = (cellW - blockW) / 2;
-  const offsetY = (cellH - blockH) / 2;
+  const fx = fitAxis(item.width, item.blockWidth, columns);
+  const fy = fitAxis(item.height, item.blockHeight, rows);
+  if (!fx || !fy) return [];
 
   const blocks: BlockItem[] = [];
   for (let r = 0; r < rows; r++) {
@@ -134,10 +143,10 @@ export function arrangeBlocks(
       blocks.push({
         id: `${item.id}-${blocks.length}`,
         kind: "block",
-        x: round2(item.x + c * (cellW + item.gapX) + offsetX),
-        y: round2(item.y + r * (cellH + item.gapY) + offsetY),
-        width: round2(blockW),
-        height: round2(blockH),
+        x: round2(item.x + fx.start + c * (item.blockWidth + (fx.gap ?? 0))),
+        y: round2(item.y + fy.start + r * (item.blockHeight + (fy.gap ?? 0))),
+        width: item.blockWidth,
+        height: item.blockHeight,
         keepAspect: true,
       });
     }
@@ -149,7 +158,7 @@ export function arrangeBlocks(
 // 等間隔配置は計算済みのブロックに展開する（spec.md 19.6）
 export function blocksOf(model: Pick<TemplateModel, "pageItems" | "blockWidth" | "blockHeight">): BlockItem[] {
   return model.pageItems.flatMap((item) =>
-    item.kind === "block" ? [item] : item.kind === "arrange" ? arrangeBlocks(item, model) : [],
+    item.kind === "block" ? [item] : item.kind === "arrange" ? arrangeBlocks(item) : [],
   );
 }
 
@@ -189,6 +198,15 @@ export function newPartId(): string {
 function num(el: Element | null | undefined, name: string, fallback = 0): number {
   const v = parseFloat(el?.getAttribute(name) ?? "");
   return Number.isFinite(v) ? v : fallback;
+}
+
+// 等間隔配置の目印の rect に続く、最初の中のブロック（関数呼び出し）。なければ null（spec.md 19.6）
+// 間に別の要素（コメントは要素ではない）が挟まった場合は、中のブロックがないものとみなす
+function firstArrangeMember(marker: Element): Element | null {
+  const next = marker.nextElementSibling;
+  return next && next.getAttribute("lcd-funcCall") === FUNC_NAME && next.getAttribute("data-arrange-member") === "1"
+    ? next
+    : null;
 }
 
 // lcdParts 属性
@@ -300,6 +318,16 @@ export function parseTemplate(svgText: string): ParsedTemplate {
     // 等間隔配置の目印の rect（spec.md 19.6）。中のブロックは指定から計算し直す
     if (el.getAttribute("data-arrange") === "1") {
       const int = (name: string, fallback: number) => Math.max(1, Math.round(num(el, name, fallback)));
+      // ブロックの大きさ。間隔を指定していた以前の形式（ブロックの大きさの属性がない）は、
+      // 続く最初の中のブロックの大きさを使う。中のブロックもなければ基準サイズ（spec.md 19.6）
+      let arrangeBlockWidth = num(el, "data-arrange-block-width", NaN);
+      let arrangeBlockHeight = num(el, "data-arrange-block-height", NaN);
+      if (!(arrangeBlockWidth > 0 && arrangeBlockHeight > 0)) {
+        // 中のブロックもないときは NaN のままにし、基準サイズ（funcArea）を読み終えてから埋める
+        const member = firstArrangeMember(el);
+        arrangeBlockWidth = num(member, "width", NaN);
+        arrangeBlockHeight = num(member, "height", NaN);
+      }
       pageItems.push({
         id: newPartId(),
         kind: "arrange",
@@ -307,10 +335,10 @@ export function parseTemplate(svgText: string): ParsedTemplate {
         y: num(el, "y"),
         width: num(el, "width"),
         height: num(el, "height"),
+        blockWidth: Number.isNaN(arrangeBlockWidth) ? NaN : Math.max(1, arrangeBlockWidth),
+        blockHeight: Number.isNaN(arrangeBlockHeight) ? NaN : Math.max(1, arrangeBlockHeight),
         columns: int("data-arrange-columns", 1),
         rows: int("data-arrange-rows", 1),
-        gapX: Math.max(0, num(el, "data-arrange-gap-x")),
-        gapY: Math.max(0, num(el, "data-arrange-gap-y")),
         // 属性がない場合はオンとして読む
         keepAspect: el.getAttribute("data-keep-aspect") !== "0",
       });
@@ -369,6 +397,15 @@ export function parseTemplate(svgText: string): ParsedTemplate {
     const item = parseElement(el);
     if (item && item.kind !== "icon" && !(item.kind === "text" && item.content !== "fixed")) pageItems.push(item);
     else unsupported++;
+  }
+
+  // ブロックの大きさがわからなかった等間隔配置は、基準サイズにする（spec.md 19.6）
+  for (const item of pageItems) {
+    if (item.kind !== "arrange") continue;
+    if (Number.isNaN(item.blockWidth) || Number.isNaN(item.blockHeight)) {
+      item.blockWidth = blockWidth;
+      item.blockHeight = blockHeight;
+    }
   }
 
   // 1 ページあたりの参加者数。属性がない古いテンプレートはブロックの数（spec.md 18.4）
@@ -447,7 +484,7 @@ function buildArrange(item: ArrangeItem, blocks: BlockItem[], firstIndex: number
   const range = blocks.length > 0 ? `ブロック ${firstIndex + 1}〜${firstIndex + blocks.length}` : "ブロックなし";
   const marker = `  <!-- 等間隔配置（${item.columns} 列 × ${item.rows} 行。${range}） -->
   <rect data-arrange="1" data-arrange-columns="${attr(item.columns)}" data-arrange-rows="${attr(item.rows)}"
-        data-arrange-gap-x="${attr(item.gapX)}" data-arrange-gap-y="${attr(item.gapY)}" data-keep-aspect="${item.keepAspect ? "1" : "0"}"
+        data-arrange-block-width="${attr(item.blockWidth)}" data-arrange-block-height="${attr(item.blockHeight)}" data-keep-aspect="${item.keepAspect ? "1" : "0"}"
         x="${attr(item.x)}" y="${attr(item.y)}" width="${attr(item.width)}" height="${attr(item.height)}" fill="#00c0c033" />`;
   return [marker, ...blocks.map((b, i) => buildBlockCall(b, firstIndex + i, true))].join("\n");
 }
@@ -464,7 +501,7 @@ export function buildTemplateSvg(model: TemplateModel, options: { withBackground
     .map((item) => {
       if (item.kind === "block") return buildBlockCall(item, blockIndex++, false);
       if (item.kind === "arrange") {
-        const blocks = arrangeBlocks(item, model);
+        const blocks = arrangeBlocks(item);
         const svg = buildArrange(item, blocks, blockIndex);
         blockIndex += blocks.length;
         return svg;
@@ -518,7 +555,7 @@ export function createPageItem(
     return { id: newPartId(), kind, x: 0, y: 0, width: model.blockWidth, height: model.blockHeight, keepAspect: true };
   }
   if (kind === "arrange") {
-    // 初期値は標準テンプレートと同じ配置（安全領域・2 列 × 4 行。spec.md 19.5）
+    // 初期値は標準テンプレートと同じ配置（安全領域・基準サイズのブロック・2 列 × 4 行。spec.md 19.5）
     return {
       id: newPartId(),
       kind,
@@ -526,10 +563,10 @@ export function createPageItem(
       y: SAFE,
       width: PAGE_WIDTH - SAFE * 2,
       height: PAGE_HEIGHT - SAFE * 2,
+      blockWidth: model.blockWidth,
+      blockHeight: model.blockHeight,
       columns: 2,
       rows: 4,
-      gapX: 111,
-      gapY: 116,
       keepAspect: true,
     };
   }
@@ -574,7 +611,7 @@ export function explodeArrange(model: TemplateModel, arrangeId: string): Templat
     ...model,
     pageItems: model.pageItems.flatMap((item) =>
       item.kind === "arrange" && item.id === arrangeId
-        ? arrangeBlocks(item, model).map((b) => ({ ...b, id: newPartId() }))
+        ? arrangeBlocks(item).map((b) => ({ ...b, id: newPartId() }))
         : [item],
     ),
   };

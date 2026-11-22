@@ -186,7 +186,7 @@ export default function TemplateEditorPage() {
       } else if (item.kind === "arrange") {
         inner.set(
           item.id,
-          arrangeBlocks(item, model).map((block) => {
+          arrangeBlocks(item).map((block) => {
             n += 1;
             return { block, label: { number: n, drawn: n <= model.entriesPerPage } };
           }),

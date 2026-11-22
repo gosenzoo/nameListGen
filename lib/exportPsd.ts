@@ -225,7 +225,7 @@ async function buildPsd(templateSvg: string, participants: Participant[], size: 
       pushBlockGroup();
     } else if (item.kind === "arrange") {
       // 等間隔配置は、中のブロックの数だけグループを並べる（spec.md 19.4）
-      arrangeBlocks(item, model).forEach(pushBlockGroup);
+      arrangeBlocks(item).forEach(pushBlockGroup);
     } else {
       // ページ上の要素はグループに入れずにレイヤーにする
       const { raster, drawnLines } = await renderOnly([], [item]);
