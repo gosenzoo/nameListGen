@@ -1,6 +1,5 @@
 // テンプレート編集画面のプレビュー用のダミーの参加者データ（spec.md 14.2）
 // 実データは使わない
-import { BLOCK_ORIGINS } from "./layout";
 import type { Participant } from "./types";
 
 const COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#9b59b6", "#f1c40f", "#e67e22", "#1abc9c", "#34495e"];
@@ -26,17 +25,20 @@ const AFTERWORD =
   "今回はじめて合同誌に参加しました。締め切り前はかなり慌ただしかったですが、" +
   "皆さんの原稿を読むのが楽しみです。\n次の機会があればまたよろしくお願いします。";
 
-// ページを埋める 8 人分のダミーデータ（ブラウザでだけ呼び出す）
-let cache: Participant[] | null = null;
-export function getSampleParticipants(): Participant[] {
-  if (!cache) {
-    cache = BLOCK_ORIGINS.map((_, i) => ({
+// ページを埋める count 人分のダミーデータ（ブラウザでだけ呼び出す。最大 100 人。spec.md 18.6）
+// 名前の番号と色を変えて繰り返す。作った分は覚えておき、足りない分だけ作り足す
+const cache: Participant[] = [];
+export function getSampleParticipants(count = 8): Participant[] {
+  const n = Math.max(0, Math.min(100, count));
+  for (let i = cache.length; i < n; i++) {
+    cache.push({
       line: i + 1,
       name: `サンプル参加者${String(i + 1).padStart(2, "0")}`,
-      contact: `X: @sample_user${i + 1}\nhttps://example.com/sample${i + 1}`,
+      contact: `X: @sample_user${i + 1}
+https://example.com/sample${i + 1}`,
       afterword: AFTERWORD,
       icon: makeIcon(COLORS[i % COLORS.length]),
-    }));
+    });
   }
-  return cache;
+  return cache.slice(0, n);
 }

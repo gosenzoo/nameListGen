@@ -1,5 +1,5 @@
-// テンプレートの SVG と編集用データの相互変換（spec.md 14.6）
-import { BLOCK_HEIGHT, BLOCK_ORIGINS, BLOCK_WIDTH, PAGE_HEIGHT, PAGE_WIDTH } from "./layout";
+// テンプレートの SVG と編集用データの相互変換（spec.md 14.6・18.7）
+import { BLOCK_HEIGHT, BLOCK_WIDTH, PAGE_HEIGHT, PAGE_WIDTH } from "./layout";
 
 // ---- 編集用のデータ ----
 
@@ -56,10 +56,42 @@ export type TextPart = {
 
 export type TemplatePart = RectPart | IconPart | ImagePart | TextPart;
 
+// ページ上のブロック（関数呼び出し。spec.md 18.2）
+export type BlockItem = {
+  id: string;
+  kind: "block";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  keepAspect: boolean; // 縦横比を保って大きさを変えるか（data-keep-aspect）
+};
+
+// ページ上の要素（spec.md 18.2）。テキストは content が "fixed" のものだけ
+export type PageItem = BlockItem | RectPart | ImagePart | TextPart;
+
 export type TemplateModel = {
   pageBackground: string; // ページの背景色
-  parts: TemplatePart[]; // 描画順（後ろほど前面）
+  entriesPerPage: number; // 1 ページあたりの参加者数（data-entries-per-page。spec.md 18.4）
+  blockWidth: number; // ブロックの基準サイズ（funcArea の幅・高さ。spec.md 18.5）
+  blockHeight: number;
+  parts: TemplatePart[]; // ブロックの中身。描画順（後ろほど前面）
+  pageItems: PageItem[]; // ページ上の要素。描画順（後ろほど前面）
 };
+
+// 1 ページあたりの参加者数の範囲（spec.md 18.4）
+export const ENTRIES_PER_PAGE_MIN = 1;
+export const ENTRIES_PER_PAGE_MAX = 100;
+
+// ページ上のブロックを、番号順（描画順）に取り出す（spec.md 18.2）
+export function blocksOf(model: Pick<TemplateModel, "pageItems">): BlockItem[] {
+  return model.pageItems.filter((item): item is BlockItem => item.kind === "block");
+}
+
+// 実際の 1 ページあたりの人数 = min(人数, ブロック数)（spec.md 18.4）
+export function effectiveEntriesPerPage(model: Pick<TemplateModel, "pageItems" | "entriesPerPage">): number {
+  return Math.min(model.entriesPerPage, blocksOf(model).length);
+}
 
 // 読み込み結果（unsupported: 編集画面で扱えず、保存すると失われる要素の数）
 export type ParsedTemplate = {
@@ -135,6 +167,51 @@ function parseTextPart(g: Element): TextPart {
   };
 }
 
+// lcdParts を持つ要素を 1 つ読む（spec.md 14.3・14.3.1 の識別ルール）。扱えない要素なら null
+function parseElement(child: Element): TemplatePart | null {
+  const p = partsOf(child);
+  const childTag = child.tagName.toLowerCase();
+  if (p === "static" && childTag === "rect") {
+    return {
+      id: newPartId(),
+      kind: "rect",
+      x: num(child, "x"),
+      y: num(child, "y"),
+      width: num(child, "width"),
+      height: num(child, "height"),
+      fill: child.getAttribute("fill") || "#000000",
+    };
+  }
+  if (p === "static" && childTag === "image" && !child.hasAttribute("lcd-href")) {
+    // lcd-href がなく、href が data URL の画像は画像（固定）パーツ（spec.md 14.3.1）
+    const href = child.getAttribute("href") ?? child.getAttribute("xlink:href") ?? "";
+    if (!href.startsWith("data:")) return null;
+    return {
+      id: newPartId(),
+      kind: "image",
+      href,
+      x: num(child, "x"),
+      y: num(child, "y"),
+      width: num(child, "width"),
+      height: num(child, "height"),
+      // 属性がない場合はオンとして読む
+      keepAspect: child.getAttribute("data-keep-aspect") !== "0",
+    };
+  }
+  if (p === "static" && childTag === "image") {
+    return {
+      id: newPartId(),
+      kind: "icon",
+      x: num(child, "x"),
+      y: num(child, "y"),
+      size: num(child, "width"),
+      circle: (child.getAttribute("clip-path") ?? "").includes("iconClip"),
+    };
+  }
+  if (p === "text" && childTag === "g") return parseTextPart(child);
+  return null;
+}
+
 // テンプレートの SVG を編集用データに変換する
 export function parseTemplate(svgText: string): ParsedTemplate {
   const doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
@@ -144,65 +221,46 @@ export function parseTemplate(svgText: string): ParsedTemplate {
   let pageBackground = "#ffffff";
   let backgroundFound = false;
   let unsupported = 0;
+  let blockWidth = BLOCK_WIDTH;
+  let blockHeight = BLOCK_HEIGHT;
   const parts: TemplatePart[] = [];
+  const pageItems: PageItem[] = [];
 
   for (const el of Array.from(root.children)) {
     const tag = el.tagName.toLowerCase();
     if (tag === "defs") continue;
-    // 関数呼び出し（8 ブロックの配置は固定なので読み飛ばす）
-    if (el.hasAttribute("lcd-funcCall")) continue;
+
+    // 関数呼び出しはページ上のブロック（lcd-arg の番号は読まず、出てきた順に番号を振り直す。spec.md 18.7）
+    if (el.getAttribute("lcd-funcCall") === FUNC_NAME) {
+      pageItems.push({
+        id: newPartId(),
+        kind: "block",
+        x: num(el, "x"),
+        y: num(el, "y"),
+        width: num(el, "width", BLOCK_WIDTH),
+        height: num(el, "height", BLOCK_HEIGHT),
+        // 属性がない場合はオンとして読む
+        keepAspect: el.getAttribute("data-keep-aspect") !== "0",
+      });
+      continue;
+    }
 
     // 参加者ブロックの定義
     if (el.getAttribute("lcd-funcDef") === FUNC_NAME) {
       for (const child of Array.from(el.children)) {
         const p = partsOf(child);
-        const childTag = child.tagName.toLowerCase();
-        if (p === "funcArea") continue;
+        // funcArea の大きさがブロックの基準サイズ（spec.md 18.5）
+        if (p === "funcArea") {
+          blockWidth = num(child, "width", BLOCK_WIDTH);
+          blockHeight = num(child, "height", BLOCK_HEIGHT);
+          continue;
+        }
         // lcdParts のない要素は描画されない目印なので読み飛ばす
         if (p === null) continue;
 
-        if (p === "static" && childTag === "rect") {
-          parts.push({
-            id: newPartId(),
-            kind: "rect",
-            x: num(child, "x"),
-            y: num(child, "y"),
-            width: num(child, "width"),
-            height: num(child, "height"),
-            fill: child.getAttribute("fill") || "#000000",
-          });
-        } else if (p === "static" && childTag === "image" && !child.hasAttribute("lcd-href")) {
-          // lcd-href がなく、href が data URL の画像は画像（固定）パーツ（spec.md 14.3.1）
-          const href = child.getAttribute("href") ?? child.getAttribute("xlink:href") ?? "";
-          if (href.startsWith("data:")) {
-            parts.push({
-              id: newPartId(),
-              kind: "image",
-              href,
-              x: num(child, "x"),
-              y: num(child, "y"),
-              width: num(child, "width"),
-              height: num(child, "height"),
-              // 属性がない場合はオンとして読む
-              keepAspect: child.getAttribute("data-keep-aspect") !== "0",
-            });
-          } else {
-            unsupported++;
-          }
-        } else if (p === "static" && childTag === "image") {
-          parts.push({
-            id: newPartId(),
-            kind: "icon",
-            x: num(child, "x"),
-            y: num(child, "y"),
-            size: num(child, "width"),
-            circle: (child.getAttribute("clip-path") ?? "").includes("iconClip"),
-          });
-        } else if (p === "text" && childTag === "g") {
-          parts.push(parseTextPart(child));
-        } else {
-          unsupported++;
-        }
+        const part = parseElement(child);
+        if (part) parts.push(part);
+        else unsupported++;
       }
       continue;
     }
@@ -214,11 +272,23 @@ export function parseTemplate(svgText: string): ParsedTemplate {
       continue;
     }
 
-    // lcdParts のない要素は描画されないので読み飛ばす。それ以外は扱えない要素
-    if (partsOf(el) !== null) unsupported++;
+    // lcdParts のない要素は描画されないので読み飛ばす
+    if (partsOf(el) === null) continue;
+
+    // ページ上の要素（spec.md 18.2）。アイコンと、参加者のデータを使うテキストはページ上では扱えない
+    const item = parseElement(el);
+    if (item && item.kind !== "icon" && !(item.kind === "text" && item.content !== "fixed")) pageItems.push(item);
+    else unsupported++;
   }
 
-  return { model: { pageBackground, parts }, unsupported };
+  // 1 ページあたりの参加者数。属性がない古いテンプレートはブロックの数（spec.md 18.4）
+  const blockCount = pageItems.filter((i) => i.kind === "block").length;
+  const perPageAttr = parseInt(root.getAttribute("data-entries-per-page") ?? "", 10);
+  const entriesPerPage = Number.isFinite(perPageAttr)
+    ? Math.min(ENTRIES_PER_PAGE_MAX, Math.max(ENTRIES_PER_PAGE_MIN, perPageAttr))
+    : Math.min(ENTRIES_PER_PAGE_MAX, Math.max(ENTRIES_PER_PAGE_MIN, blockCount));
+
+  return { model: { pageBackground, entriesPerPage, blockWidth, blockHeight, parts, pageItems }, unsupported };
 }
 
 // ---- 編集用データ → SVG ----
@@ -271,17 +341,26 @@ function buildPart(part: TemplatePart): string {
   }
 }
 
+// ページ上の要素 1 つ分の SVG（ページ座標。blockIndex: ブロックの番号 - 1）
+function buildPageItem(item: PageItem, blockIndex: number): string {
+  if (item.kind !== "block") return buildPart(item);
+  return `  <!-- ブロック ${blockIndex + 1}（${blockIndex + 1} 人目の参加者） -->
+  <rect lcd-funcCall="${FUNC_NAME}" lcd-arg="entry:entries[${blockIndex}]" x="${attr(item.x)}" y="${attr(item.y)}" width="${attr(item.width)}" height="${attr(item.height)}" fill="#0000ff33"
+        data-keep-aspect="${item.keepAspect ? "1" : "0"}" />`;
+}
+
 // 編集用データからテンプレートの SVG を組み立てる（spec.md 7.3 の形式）
 // withBackground: false のときはページの背景を入れない（PSD のレイヤー用に、パーツだけを描くとき。spec.md 17.5）
 export function buildTemplateSvg(model: TemplateModel, options: { withBackground?: boolean } = {}): string {
   const withBackground = options.withBackground ?? true;
   const parts = model.parts.map(buildPart).join("\n\n");
-  const calls = BLOCK_ORIGINS.map(
-    ({ x, y }, i) =>
-      `  <rect lcd-funcCall="${FUNC_NAME}" lcd-arg="entry:entries[${i}]" x="${x}" y="${y}" width="${BLOCK_WIDTH}" height="${BLOCK_HEIGHT}" fill="#0000ff33" />`,
-  ).join("\n");
+  // ページ上の要素。ブロックには描画順に entries[0], entries[1] … を振る（spec.md 18.2）
+  let blockIndex = 0;
+  const items = model.pageItems
+    .map((item) => buildPageItem(item, item.kind === "block" ? blockIndex++ : -1))
+    .join("\n\n");
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}" width="${PAGE_WIDTH}" height="${PAGE_HEIGHT}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}" width="${PAGE_WIDTH}" height="${PAGE_HEIGHT}" data-entries-per-page="${attr(model.entriesPerPage)}">
   <!-- あとがきリスト 1 ページ分のテンプレート（テンプレート編集画面で作成。spec.md 7.3・14.6）
        B5 + 塗り足し 3mm（188 x 263 mm）を 350dpi で ${PAGE_WIDTH} x ${PAGE_HEIGHT} px として扱う -->
 
@@ -304,18 +383,26 @@ ${
 
   <!-- 参加者ブロックの定義（関数入力） -->
   <g lcd-funcDef="${FUNC_NAME}">
-    <rect lcdParts="funcArea" x="0" y="0" width="${BLOCK_WIDTH}" height="${BLOCK_HEIGHT}" fill="#80808033" />
+    <rect lcdParts="funcArea" x="0" y="0" width="${attr(model.blockWidth)}" height="${attr(model.blockHeight)}" fill="#80808033" />
 
 ${parts}
   </g>
 
-  <!-- 8 ブロックの呼び出し（左上から右へ、次の段へ） -->
-${calls}
+  <!-- ページ上の要素（描画順）。ブロックは関数呼び出しで、番号順に参加者を割り当てる（spec.md 18.2） -->
+${items}
 </svg>
 `;
 }
 
 // ---- 新しいパーツの既定値 ----
+
+// 新しいページ上の要素（spec.md 18.2）。ブロックの大きさは基準サイズ、テキストは固定の文字列
+export function createPageItem(kind: "block" | "rect" | "text", model: Pick<TemplateModel, "blockWidth" | "blockHeight">): PageItem {
+  if (kind === "block") {
+    return { id: newPartId(), kind, x: 0, y: 0, width: model.blockWidth, height: model.blockHeight, keepAspect: true };
+  }
+  return createPart(kind) as RectPart | TextPart;
+}
 
 // 画像（固定）は読み込んだ画像が必要なので createImagePart で作る
 export function createPart(kind: Exclude<TemplatePart["kind"], "image">): TemplatePart {

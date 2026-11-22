@@ -1,17 +1,22 @@
 "use client";
 
-// テンプレート編集画面（F-08・F-09。spec.md 14章）
+// テンプレート編集画面（F-08・F-09・F-13。spec.md 14章・18章）
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import EditorCanvas from "./components/EditorCanvas";
+import EditorCanvas, { type BlockLabel, type CanvasItem } from "./components/EditorCanvas";
 import { ConfirmDialog, SaveDialog } from "./components/Dialog";
-import PartList from "./components/PartList";
+import PartList, { type AddButton } from "./components/PartList";
 import PropertyPanel from "./components/PropertyPanel";
+import SettingsPanel from "./components/SettingsPanel";
+import { partLabel } from "./partLabel";
+import { PAGE_HEIGHT, PAGE_WIDTH } from "@/lib/layout";
 import {
   buildTemplateSvg,
   createImagePart,
+  createPageItem,
   createPart,
   parseTemplate,
+  type PageItem,
   type TemplateModel,
   type TemplatePart,
 } from "@/lib/templateModel";
@@ -62,8 +67,9 @@ export default function TemplateEditorPage() {
   const [templates, setTemplates] = useState<StoredTemplateSummary[]>([]);
   const [openValue, setOpenValue] = useState(BUILTIN_VALUE);
 
-  // 表示・ダイアログ
-  const [showFullPage, setShowFullPage] = useState(false);
+  // 編集する範囲（「ページ」か「ブロックの中身」か。spec.md 18.6）
+  const [editMode, setEditMode] = useState<"page" | "block">("page");
+  // ダイアログ
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -134,14 +140,77 @@ export default function TemplateEditorPage() {
     [model],
   );
 
+  // 編集中の範囲の要素（「ページ」ならページ上の要素、「ブロックの中身」ならブロックの中のパーツ）
+  const items: CanvasItem[] = useMemo(
+    () => (model ? (editMode === "page" ? model.pageItems : model.parts) : []),
+    [model, editMode],
+  );
+
+  // 編集中の範囲の要素を置き換えたモデルを返す
+  const withItems = useCallback(
+    (base: TemplateModel, next: CanvasItem[]): TemplateModel =>
+      editMode === "page" ? { ...base, pageItems: next as PageItem[] } : { ...base, parts: next as TemplatePart[] },
+    [editMode],
+  );
+
   // 1 パーツを置き換える
   const replacePart = useCallback(
-    (part: TemplatePart, record = true) => {
+    (part: CanvasItem, record = true) => {
       if (!model) return;
-      applyModel({ ...model, parts: model.parts.map((p) => (p.id === part.id ? part : p)) }, record);
+      applyModel(withItems(model, items.map((p) => (p.id === part.id ? part : p))), record);
     },
-    [model, applyModel],
+    [model, items, withItems, applyModel],
   );
+
+  // 編集中の範囲の最後（最前面）にパーツを追加して選ぶ
+  const addItem = (part: CanvasItem) => {
+    if (!model) return;
+    applyModel(withItems(model, [...items, part]));
+    setSelectedId(part.id);
+  };
+
+  // ブロックの番号（ページ上の要素のうちブロックだけを描画順に数える。spec.md 18.2）
+  const blockLabels = useMemo(() => {
+    const labels = new Map<string, BlockLabel>();
+    if (!model) return labels;
+    let n = 0;
+    for (const item of model.pageItems) {
+      if (item.kind !== "block") continue;
+      n += 1;
+      labels.set(item.id, { number: n, drawn: n <= model.entriesPerPage });
+    }
+    return labels;
+  }, [model]);
+
+  // パーツ一覧・プロパティ欄の表示名（ブロックは番号つき。spec.md 18.6）
+  const labelOf = (part: CanvasItem): string => {
+    const label = blockLabels.get(part.id);
+    if (part.kind === "block" && label) return `ブロック ${label.number}${label.drawn ? "" : "（描画なし）"}`;
+    return partLabel(part);
+  };
+
+  // キャンバスに描くテンプレートと表示範囲
+  // 「ブロックの中身」では、基準サイズのブロック 1 つだけを (0, 0) に置いたテンプレートで描く
+  const canvasView = useMemo(() => {
+    if (!model) return null;
+    if (editMode === "page") {
+      return {
+        previewSvg: templateSvg,
+        area: { x: 0, y: 0, width: PAGE_WIDTH, height: PAGE_HEIGHT },
+        sampleCount: model.entriesPerPage,
+      };
+    }
+    const single: TemplateModel = {
+      ...model,
+      entriesPerPage: 1,
+      pageItems: [{ id: "preview", kind: "block", x: 0, y: 0, width: model.blockWidth, height: model.blockHeight, keepAspect: true }],
+    };
+    return {
+      previewSvg: buildTemplateSvg(single),
+      area: { x: 0, y: 0, width: model.blockWidth, height: model.blockHeight },
+      sampleCount: 1,
+    };
+  }, [model, editMode, templateSvg]);
 
   // ドラッグ開始時に、変更前の状態を記録する
   const recordSnapshot = useCallback(() => {
@@ -166,17 +235,16 @@ export default function TemplateEditorPage() {
     setDirty(true);
   }, [model, future]);
 
-  const selectedIndex = model ? model.parts.findIndex((p) => p.id === selectedId) : -1;
-  const selectedPart = model && selectedIndex >= 0 ? model.parts[selectedIndex] : null;
+  // 選択中のパーツ（編集中の範囲の中で探す）
+  const selectedIndex = items.findIndex((p) => p.id === selectedId);
+  const selectedPart = selectedIndex >= 0 ? items[selectedIndex] : null;
 
   // 「＋画像」で選んだ画像ファイルからパーツを追加する（spec.md 14.3.1）
   const addImage = async (file: File) => {
     if (!model) return;
     setError(null);
     try {
-      const part = createImagePart(await loadImageFile(file));
-      applyModel({ ...model, parts: [...model.parts, part] });
-      setSelectedId(part.id);
+      addItem(createImagePart(await loadImageFile(file)));
     } catch (e) {
       setError(messageOf(e));
     }
@@ -198,11 +266,11 @@ export default function TemplateEditorPage() {
   const movePartOrder = (offset: number) => {
     if (!model || selectedIndex < 0) return;
     const to = selectedIndex + offset;
-    if (to < 0 || to >= model.parts.length) return;
-    const parts = [...model.parts];
-    const [part] = parts.splice(selectedIndex, 1);
-    parts.splice(to, 0, part);
-    applyModel({ ...model, parts });
+    if (to < 0 || to >= items.length) return;
+    const next = [...items];
+    const [part] = next.splice(selectedIndex, 1);
+    next.splice(to, 0, part);
+    applyModel(withItems(model, next));
   };
 
   // キーボード操作（矢印キーで移動、Ctrl+Z / Ctrl+Y で元に戻す／やり直し）
@@ -231,7 +299,7 @@ export default function TemplateEditorPage() {
         ArrowUp: [0, -step],
         ArrowDown: [0, step],
       };
-      if (selectedPart && delta[e.key] && !showFullPage) {
+      if (selectedPart && delta[e.key]) {
         e.preventDefault();
         const [dx, dy] = delta[e.key];
         replacePart({ ...selectedPart, x: selectedPart.x + dx, y: selectedPart.y + dy });
@@ -239,7 +307,7 @@ export default function TemplateEditorPage() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [confirm, saveOpen, undo, redo, selectedPart, replacePart, showFullPage]);
+  }, [confirm, saveOpen, undo, redo, selectedPart, replacePart]);
 
   // ---- 開く・保存・削除・戻る ----
 
@@ -407,54 +475,91 @@ export default function TemplateEditorPage() {
         {notice && <p className="rounded border border-green-300 bg-green-50 p-2 text-sm text-green-800">{notice}</p>}
       </header>
 
-      {model && (
-        <div className="grid grid-cols-[220px_minmax(0,1fr)_260px] gap-4">
-          {/* パーツ一覧 */}
-          <PartList
-            parts={model.parts}
-            selectedId={selectedId}
-            pageBackground={model.pageBackground}
-            onSelect={setSelectedId}
-            onAdd={(kind) => {
-              const part = createPart(kind);
-              applyModel({ ...model, parts: [...model.parts, part] });
-              setSelectedId(part.id);
-            }}
-            onAddImage={(file) => void addImage(file)}
-            onPageBackgroundChange={(pageBackground) => applyModel({ ...model, pageBackground })}
-          />
+      {model && canvasView && (
+        <div className="grid grid-cols-[240px_minmax(0,1fr)_260px] gap-4">
+          <div className="flex flex-col gap-4">
+            {/* 編集する範囲の切り替え（spec.md 18.6） */}
+            <section className="flex flex-col gap-1 text-sm">
+              <h2 className="font-bold">編集する範囲</h2>
+              {(
+                [
+                  ["page", "ページ"],
+                  ["block", "ブロックの中身"],
+                ] as const
+              ).map(([value, label]) => (
+                <label key={value} className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="editMode"
+                    checked={editMode === value}
+                    onChange={() => {
+                      setEditMode(value);
+                      setSelectedId(null);
+                    }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </section>
+
+            {/* パーツ一覧 */}
+            <PartList
+              entries={items.map((p) => ({ id: p.id, label: labelOf(p) }))}
+              selectedId={selectedId}
+              addButtons={
+                editMode === "page"
+                  ? ([
+                      { label: "＋ブロック", onClick: () => addItem(createPageItem("block", model)) },
+                      { label: "＋塗り", onClick: () => addItem(createPageItem("rect", model)) },
+                      { label: "＋テキスト", onClick: () => addItem(createPageItem("text", model)) },
+                    ] satisfies AddButton[])
+                  : ([
+                      { label: "＋塗り", onClick: () => addItem(createPart("rect")) },
+                      { label: "＋テキスト", onClick: () => addItem(createPart("text")) },
+                      { label: "＋アイコン", onClick: () => addItem(createPart("icon")) },
+                    ] satisfies AddButton[])
+              }
+              onSelect={setSelectedId}
+              onAddImage={(file) => void addImage(file)}
+            />
+
+            {/* 設定欄（spec.md 18.5） */}
+            <SettingsPanel model={model} onChange={(next) => applyModel(next)} />
+          </div>
 
           {/* キャンバス */}
           <div className="flex flex-col gap-2">
             <EditorCanvas
-              templateSvg={templateSvg}
-              parts={model.parts}
+              previewSvg={canvasView.previewSvg}
+              area={canvasView.area}
+              sampleCount={canvasView.sampleCount}
+              items={items}
+              blockLabels={editMode === "page" ? blockLabels : new Map()}
               selectedId={selectedId}
-              showFullPage={showFullPage}
               onSelect={setSelectedId}
               onDragStart={recordSnapshot}
               onDragChange={(part) => replacePart(part, false)}
             />
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={showFullPage} onChange={(e) => setShowFullPage(e.target.checked)} />
-              ページ全体を表示（表示のみ。操作はブロック 1 つの表示で行います）
-            </label>
             <p className="text-xs text-zinc-500">
               ドラッグで移動、四隅と辺のハンドルで大きさを変更。矢印キーで 1px（Shift で 10px）移動。Ctrl+Z で元に戻す、Ctrl+Y でやり直し。
+              {editMode === "page" && " ブロックの左上の数字は、各ページの何人目の参加者を描くかを表します。"}
             </p>
           </div>
 
           {/* プロパティ欄 */}
           <PropertyPanel
             part={selectedPart}
-            canMoveForward={selectedIndex >= 0 && selectedIndex < model.parts.length - 1}
+            label={selectedPart ? labelOf(selectedPart) : ""}
+            blockLabel={selectedPart ? (blockLabels.get(selectedPart.id) ?? null) : null}
+            fixedTextOnly={editMode === "page"}
+            canMoveForward={selectedIndex >= 0 && selectedIndex < items.length - 1}
             canMoveBackward={selectedIndex > 0}
             onChange={(part) => replacePart(part)}
             onMoveForward={() => movePartOrder(1)}
             onMoveBackward={() => movePartOrder(-1)}
             onReplaceImage={(file) => void replaceImage(file)}
             onDelete={() => {
-              applyModel({ ...model, parts: model.parts.filter((p) => p.id !== selectedId) });
+              applyModel(withItems(model, items.filter((p) => p.id !== selectedId)));
               setSelectedId(null);
             }}
           />

@@ -21,6 +21,7 @@ import {
   type StoredTemplateSummary,
   type TemplateRef,
 } from "@/lib/templateStore";
+import { blocksOf, effectiveEntriesPerPage, parseTemplate, type BlockItem } from "@/lib/templateModel";
 import type { Page, Participant, ParseResult, RenderedPage } from "@/lib/types";
 
 // 選んだテンプレートを覚えておく localStorage のキー
@@ -53,6 +54,8 @@ export default function Home() {
   // PSD 書き出し用に、描画に使ったテンプレートとページ割りを覚えておく（F-11）
   const [renderedTemplate, setRenderedTemplate] = useState("");
   const [pageData, setPageData] = useState<Page[]>([]);
+  // ガイド表示用の、テンプレートのブロックの位置・大きさ（spec.md 18.4）
+  const [templateBlocks, setTemplateBlocks] = useState<BlockItem[]>([]);
   // PSD のキャンバスサイズの入力ダイアログ（target: 保存するページ番号。"all" はすべて）
   const [psdTarget, setPsdTarget] = useState<number | "all" | null>(null);
   const [showGuide, setShowGuide] = useState(false);
@@ -92,10 +95,14 @@ export default function Home() {
   // 参加者をページ割りし、テンプレートで描画する
   const render = async (participants: Participant[], value: string) => {
     const templateSvg = await loadTemplateSvg(toTemplateRef(value));
-    const paged = paginate(participants);
+    // テンプレートから人数とブロックを読み、実際の 1 ページあたりの人数で区切る（spec.md 18.4）
+    // ブロックが 0 個なら paginate がエラーにする（プレビューと書き出しはしない）
+    const { model } = parseTemplate(templateSvg);
+    const paged = paginate(participants, effectiveEntriesPerPage(model));
     setPages(await renderPages(paged, templateSvg));
     setRenderedTemplate(templateSvg);
     setPageData(paged);
+    setTemplateBlocks(blocksOf(model));
   };
 
   // CSV を読み込み、ページ割りと描画まで行う
@@ -153,9 +160,7 @@ export default function Home() {
     setPsdTarget(null);
     if (target === "all") {
       void runExport("PSD を作成中…", () =>
-        exportAllPsds(renderedTemplate, pageData, size, (done, total) =>
-          setExportStatus(`PSD を作成中…（${done} / ${total} ページ）`),
-        ),
+        exportAllPsds(renderedTemplate, pageData, size, (message) => setExportStatus(message)),
       );
     } else if (target !== null) {
       const page = pageData.find((p) => p.pageNumber === target);
@@ -238,6 +243,7 @@ export default function Home() {
                 pageNumber={p.pageNumber}
                 svg={p.svg}
                 showGuide={showGuide}
+                blocks={templateBlocks}
                 disabled={exporting}
                 onSave={() => runExport("PNG を作成中…", () => exportPng(p.svg, p.pageNumber))}
                 onSavePsd={() => setPsdTarget(p.pageNumber)}

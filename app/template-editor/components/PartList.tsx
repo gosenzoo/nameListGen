@@ -1,39 +1,43 @@
 "use client";
 
-// パーツ一覧（追加ボタン・ページ背景色つき。spec.md 14.2）
+// パーツ一覧（追加ボタンつき。spec.md 14.2・18.6）
+// 「ページ」の編集ではページ上の要素、「ブロックの中身」の編集ではブロックの中のパーツを並べる
 import { useRef } from "react";
 import { IMAGE_ACCEPT } from "@/lib/imageFile";
-import type { TemplatePart } from "@/lib/templateModel";
-import { partLabel } from "../partLabel";
-import { ColorField } from "./Fields";
+
+// 一覧の 1 行（表示名は呼び出し側で決める。ブロックの番号は並び順で変わるため）
+export type PartListEntry = { id: string; label: string };
+
+// 追加ボタン（画像以外）
+export type AddButton = { label: string; onClick: () => void };
 
 type Props = {
-  parts: TemplatePart[];
+  entries: PartListEntry[];
   selectedId: string | null;
-  pageBackground: string;
+  addButtons: AddButton[];
   onSelect: (id: string) => void;
-  onAdd: (kind: Exclude<TemplatePart["kind"], "image">) => void;
   onAddImage: (file: File) => void; // 「＋画像」で画像ファイルを選んだとき
-  onPageBackgroundChange: (color: string) => void;
 };
 
-export default function PartList({ parts, selectedId, pageBackground, onSelect, onAdd, onAddImage, onPageBackgroundChange }: Props) {
+export default function PartList({ entries, selectedId, addButtons, onSelect, onAddImage }: Props) {
   // 「＋画像」で開くファイル選択（画像を選んだ時点でパーツを追加する。spec.md 14.3.1）
   const fileRef = useRef<HTMLInputElement>(null);
+  const buttonClass = "rounded border border-zinc-400 px-2 py-1 hover:bg-zinc-100";
+
   return (
     <div className="flex flex-col gap-4">
       <section>
         <h2 className="mb-1 text-sm font-bold">パーツ（下ほど前面）</h2>
         <ul className="flex flex-col rounded border border-zinc-300 text-sm">
-          {parts.length === 0 && <li className="px-2 py-1 text-zinc-500">パーツがありません</li>}
-          {parts.map((p) => (
+          {entries.length === 0 && <li className="px-2 py-1 text-zinc-500">パーツがありません</li>}
+          {entries.map((p) => (
             <li key={p.id}>
               <button
                 type="button"
                 className={`w-full px-2 py-1 text-left ${p.id === selectedId ? "bg-blue-100 font-bold" : "hover:bg-zinc-100"}`}
                 onClick={() => onSelect(p.id)}
               >
-                {partLabel(p)}
+                {p.label}
               </button>
             </li>
           ))}
@@ -43,16 +47,12 @@ export default function PartList({ parts, selectedId, pageBackground, onSelect, 
       <section className="flex flex-col gap-1">
         <h2 className="text-sm font-bold">追加</h2>
         <div className="flex flex-wrap gap-2 text-sm">
-          <button type="button" className="rounded border border-zinc-400 px-2 py-1 hover:bg-zinc-100" onClick={() => onAdd("rect")}>
-            ＋塗り
-          </button>
-          <button type="button" className="rounded border border-zinc-400 px-2 py-1 hover:bg-zinc-100" onClick={() => onAdd("text")}>
-            ＋テキスト
-          </button>
-          <button type="button" className="rounded border border-zinc-400 px-2 py-1 hover:bg-zinc-100" onClick={() => onAdd("icon")}>
-            ＋アイコン
-          </button>
-          <button type="button" className="rounded border border-zinc-400 px-2 py-1 hover:bg-zinc-100" onClick={() => fileRef.current?.click()}>
+          {addButtons.map((b) => (
+            <button key={b.label} type="button" className={buttonClass} onClick={b.onClick}>
+              {b.label}
+            </button>
+          ))}
+          <button type="button" className={buttonClass} onClick={() => fileRef.current?.click()}>
             ＋画像
           </button>
           <input
@@ -68,10 +68,6 @@ export default function PartList({ parts, selectedId, pageBackground, onSelect, 
             }}
           />
         </div>
-      </section>
-
-      <section>
-        <ColorField label="ページの背景色" value={pageBackground} onChange={onPageBackgroundChange} />
       </section>
     </div>
   );

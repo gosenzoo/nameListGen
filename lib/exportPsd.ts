@@ -1,10 +1,19 @@
-// PSD 書き出し・ダウンロード（F-11。spec.md 17章）
+// PSD 書き出し・ダウンロード（F-11・F-12。spec.md 17章）
 // 参加者ブロックの中の要素を 1 要素 1 レイヤーにし、ブロックごとにグループにまとめる
+// ページ上の要素（ブロックの外。spec.md 18.2）はグループに入れずにレイヤーにする
 import type { Layer, Psd } from "ag-psd";
 import { downloadBlob, getCapture } from "./exportPng";
-import { BLOCK_ORIGINS, PAGE_HEIGHT, PAGE_WIDTH } from "./layout";
+import { PAGE_HEIGHT, PAGE_WIDTH } from "./layout";
 import { renderTemplatePreview } from "./render";
-import { buildTemplateSvg, parseTemplate, type TemplatePart, type TextPart } from "./templateModel";
+import {
+  blocksOf,
+  buildTemplateSvg,
+  parseTemplate,
+  type PageItem,
+  type TemplateModel,
+  type TemplatePart,
+  type TextPart,
+} from "./templateModel";
 import type { Page, Participant } from "./types";
 
 // 解像度情報（キャンバスサイズを変えても 350dpi のまま。spec.md 17.2）
@@ -23,7 +32,16 @@ const CROP_PADDING = 4;
 // 文字レイヤーのフォント（PostScript 名。spec.md 17.4）
 const PSD_FONTS = { "400": "BIZUDGothic-Regular", "700": "BIZUDGothic-Bold" } as const;
 
+// ZIP のファイル名（spec.md 17.5）
+const ZIP_FILE_NAME = "afterword_psd.zip";
+
 export type PsdSize = { width: number; height: number };
+
+// レイヤーになる要素（ブロックの中身のパーツと、ブロック以外のページ上の要素）
+type LayerPart = Exclude<TemplatePart | PageItem, { kind: "block" }>;
+
+// 範囲（ページ座標）
+type Box = { x: number; y: number; width: number; height: number };
 
 // ファイル名（afterword_01.psd の形。PNG と同じ番号の付け方）
 export function psdFileName(pageNumber: number): string {
@@ -36,7 +54,7 @@ export function countPsdUnsupported(templateSvg: string): number {
 }
 
 // 要素の識別ルールによるレイヤー名（spec.md 17.3）
-function layerName(part: TemplatePart): string {
+function layerName(part: LayerPart): string {
   switch (part.kind) {
     case "icon":
       return "アイコン";
@@ -49,8 +67,8 @@ function layerName(part: TemplatePart): string {
   }
 }
 
-// パーツの範囲（ブロック内の座標）。テキストは textArea
-function partBox(part: TemplatePart): { x: number; y: number; width: number; height: number } {
+// パーツの範囲（ブロック内またはページの座標）。テキストは textArea
+function partBox(part: LayerPart): Box {
   return part.kind === "icon"
     ? { x: part.x, y: part.y, width: part.size, height: part.size }
     : { x: part.x, y: part.y, width: part.width, height: part.height };
@@ -112,6 +130,7 @@ async function buildPsd(templateSvg: string, participants: Participant[], size: 
   const { writePsd } = await import("ag-psd");
   const capture = await getCapture();
   const { model } = parseTemplate(templateSvg);
+  const blocks = blocksOf(model);
 
   // ページ全体を、縦横比を保ってキャンバスに収め、中央に置く（spec.md 17.2）
   const scale = Math.min(size.width / PAGE_WIDTH, size.height / PAGE_HEIGHT);
@@ -127,55 +146,85 @@ async function buildPsd(templateSvg: string, participants: Participant[], size: 
   };
 
   // ページ座標の範囲を、キャンバス上の切り出し範囲（整数・キャンバス内に収める）にする
-  const toCanvasRect = (x: number, y: number, width: number, height: number) => {
-    const left = Math.max(0, Math.floor(ox + (x - CROP_PADDING) * scale));
-    const top = Math.max(0, Math.floor(oy + (y - CROP_PADDING) * scale));
-    const right = Math.min(size.width, Math.ceil(ox + (x + width + CROP_PADDING) * scale));
-    const bottom = Math.min(size.height, Math.ceil(oy + (y + height + CROP_PADDING) * scale));
+  const toCanvasRect = (box: Box) => {
+    const left = Math.max(0, Math.floor(ox + (box.x - CROP_PADDING) * scale));
+    const top = Math.max(0, Math.floor(oy + (box.y - CROP_PADDING) * scale));
+    const right = Math.min(size.width, Math.ceil(ox + (box.x + box.width + CROP_PADDING) * scale));
+    const bottom = Math.min(size.height, Math.ceil(oy + (box.y + box.height + CROP_PADDING) * scale));
     return { left, top, width: right - left, height: bottom - top };
+  };
+
+  // 一部の要素だけのテンプレート（背景なし）で、このページの参加者を描いてラスタライズする
+  const renderOnly = async (parts: TemplatePart[], pageItems: PageItem[]) => {
+    const onlyModel: TemplateModel = { ...model, parts, pageItems };
+    const svg = await renderTemplatePreview(buildTemplateSvg(onlyModel, { withBackground: false }), participants);
+    return { raster: await rasterize(svg), drawnLines: readDrawnLines(svg) };
+  };
+
+  // 1 要素分のレイヤーを作る（box: ページ座標の範囲、sy: テキストの行送りに掛ける縦の倍率）
+  // 何も描かれていない（キャンバスの外、文字が 1 行もない）ときは null
+  const makeLayer = (part: LayerPart, raster: HTMLCanvasElement, drawnLines: DrawnLine[], box: Box, sy: number): Layer | null => {
+    const rect = toCanvasRect(box);
+    if (rect.width <= 0 || rect.height <= 0) return null; // キャンバスの外
+    const layer: Layer = {
+      name: layerName(part),
+      left: rect.left,
+      top: rect.top,
+      canvas: cropCanvas(raster, rect.left, rect.top, rect.width, rect.height),
+    };
+    if (part.kind === "text") {
+      // この範囲（textArea）の中に描かれた行（文字が 1 行もなければレイヤーを作らない）
+      const lines = drawnLines.filter(
+        (l) => l.x >= box.x - 1 && l.x <= box.x + box.width + 1 && l.y >= box.y && l.y <= box.y + box.height + 1,
+      );
+      if (lines.length === 0) return null;
+      layer.text = buildTextData(part, lines, box, (part.lineHeight + part.interval) * sy, scale, ox, oy);
+    }
+    return layer;
   };
 
   // 合成画像: PNG と同じページ全体の描画結果（余白はページの背景色）
   const composite = filledCanvas(size.width, size.height, model.pageBackground);
   composite.getContext("2d")?.drawImage(await rasterize(await renderTemplatePreview(templateSvg, participants)), 0, 0);
 
-  // ブロックごとのレイヤー（ag-psd の children は下から上の順）
-  const blockLayers: Layer[][] = participants.map(() => []);
+  // 参加者を描くブロック（このページの人数分。spec.md 18.4）のレイヤー（ag-psd の children は下から上の順）
+  const drawnBlocks = blocks.slice(0, participants.length);
+  const blockLayers: Layer[][] = drawnBlocks.map(() => []);
 
-  // パーツごとに、そのパーツだけのテンプレート（背景なし）で 8 ブロック分を一度に描き、ブロックごとに切り出す
+  // ブロックの中身: パーツごとに、そのパーツだけを全ブロックで一度に描き、ブロックごとに切り出す
   for (const part of model.parts) {
-    const partTemplate = buildTemplateSvg({ pageBackground: model.pageBackground, parts: [part] }, { withBackground: false });
-    const partSvg = await renderTemplatePreview(partTemplate, participants);
-    const raster = await rasterize(partSvg);
-    const drawnLines = part.kind === "text" ? readDrawnLines(partSvg) : [];
+    const { raster, drawnLines } = await renderOnly([part], blocks);
     const box = partBox(part);
-
-    participants.forEach((participant, j) => {
+    drawnBlocks.forEach((block, j) => {
       // アイコンのない参加者のアイコンは描かれないので、レイヤーを作らない（spec.md 17.3）
-      if (part.kind === "icon" && !participant.icon) return;
-
-      const origin = BLOCK_ORIGINS[j];
-      const rect = toCanvasRect(origin.x + box.x, origin.y + box.y, box.width, box.height);
-      if (rect.width <= 0 || rect.height <= 0) return; // キャンバスの外
-      const layer: Layer = {
-        name: layerName(part),
-        left: rect.left,
-        top: rect.top,
-        canvas: cropCanvas(raster, rect.left, rect.top, rect.width, rect.height),
-      };
-
-      if (part.kind === "text") {
-        // このブロックの textArea の中に描かれた行（文字が 1 行もなければレイヤーを作らない）
-        const areaX = origin.x + part.x;
-        const areaY = origin.y + part.y;
-        const lines = drawnLines.filter(
-          (l) => l.x >= areaX - 1 && l.x <= areaX + part.width + 1 && l.y >= areaY && l.y <= areaY + part.height + 1,
-        );
-        if (lines.length === 0) return;
-        layer.text = buildTextData(part, lines, areaX, scale, ox, oy);
-      }
-      blockLayers[j].push(layer);
+      if (part.kind === "icon" && !participants[j].icon) return;
+      // ブロックの倍率（ブロックの大きさ ÷ 基準サイズ。spec.md 18.3）で、ブロック内の座標をページ座標にする
+      const sx = model.blockWidth > 0 ? block.width / model.blockWidth : 1;
+      const sy = model.blockHeight > 0 ? block.height / model.blockHeight : 1;
+      const pageBox = { x: block.x + box.x * sx, y: block.y + box.y * sy, width: box.width * sx, height: box.height * sy };
+      const layer = makeLayer(part, raster, drawnLines, pageBox, sy);
+      if (layer) blockLayers[j].push(layer);
     });
+  }
+
+  // 背景の上に、ページ上の要素とブロックを描画順に並べる（spec.md 17.5「F-13 によるレイヤー構成の変更」）
+  const children: Layer[] = [
+    // 背景: キャンバス全体をページの背景色で塗る
+    { name: "背景", canvas: filledCanvas(size.width, size.height, model.pageBackground) },
+  ];
+  let blockIndex = 0;
+  for (const item of model.pageItems) {
+    if (item.kind === "block") {
+      const j = blockIndex++;
+      // 参加者を描かないブロックのグループは作らない
+      if (j >= drawnBlocks.length) continue;
+      children.push({ name: `ブロック${j + 1}：${participants[j].name}`, opened: true, children: blockLayers[j] });
+    } else {
+      // ページ上の要素はグループに入れずにレイヤーにする
+      const { raster, drawnLines } = await renderOnly([], [item]);
+      const layer = makeLayer(item, raster, drawnLines, partBox(item), 1);
+      if (layer) children.push(layer);
+    }
   }
 
   const psd: Psd = {
@@ -192,26 +241,25 @@ async function buildPsd(templateSvg: string, participants: Participant[], size: 
         heightUnit: "Inches",
       },
     },
-    children: [
-      // 背景: キャンバス全体をページの背景色で塗る
-      { name: "背景", canvas: filledCanvas(size.width, size.height, model.pageBackground) },
-      // ブロック 1 が下、ブロック 8 が上（spec.md 17.3）
-      ...participants.map((p, j) => ({
-        name: `ブロック${j + 1}：${p.name}`,
-        opened: true,
-        children: blockLayers[j],
-      })),
-    ],
+    children,
   };
   return writePsd(psd, { generateThumbnail: true });
 }
 
 // 文字レイヤーの情報を作る（spec.md 17.4）
-function buildTextData(part: TextPart, lines: DrawnLine[], areaX: number, scale: number, ox: number, oy: number): Layer["text"] {
+// area: textArea（ページ座標）、step: 行送り（ページ座標）
+function buildTextData(
+  part: TextPart,
+  lines: DrawnLine[],
+  area: Box,
+  step: number,
+  scale: number,
+  ox: number,
+  oy: number,
+): Layer["text"] {
   const sorted = [...lines].sort((a, b) => a.y - b.y);
   const first = sorted[0];
-  // 行送り（描画エンジンの行の間隔）。空行は描かれないので、y の差から行番号を求めて空行を補う
-  const step = part.lineHeight + part.interval;
+  // 空行は描かれないので、y の差から行番号を求めて空行を補う
   let text = "";
   let lastIndex = 0;
   sorted.forEach((line, i) => {
@@ -222,7 +270,8 @@ function buildTextData(part: TextPart, lines: DrawnLine[], areaX: number, scale:
   });
 
   // ポイントテキストの基準点: 揃えに合わせて textArea の左端・中央・右端、y は 1 行目のベースライン
-  const anchorX = part.align === "center" ? areaX + part.width / 2 : part.align === "right" ? areaX + part.width : areaX;
+  const anchorX =
+    part.align === "center" ? area.x + area.width / 2 : part.align === "right" ? area.x + area.width : area.x;
   return {
     text,
     transform: [1, 0, 0, 1, ox + anchorX * scale, oy + first.y * scale],
@@ -243,17 +292,27 @@ export async function exportPsd(templateSvg: string, page: Page, size: PsdSize):
   downloadBlob(new Blob([buffer], { type: "image/vnd.adobe.photoshop" }), psdFileName(page.pageNumber));
 }
 
-// 全ページを 1 枚ずつ順番にダウンロードする（onProgress: 作成中のページが何枚目か）
+// 全ページの PSD を 1 つの ZIP にまとめてダウンロードする（F-12。spec.md 17.5）
+// onProgress: 画面に出す進み具合の文言
 export async function exportAllPsds(
   templateSvg: string,
   pages: Page[],
   size: PsdSize,
-  onProgress: (done: number, total: number) => void,
+  onProgress: (message: string) => void,
 ): Promise<void> {
+  // 全ページの PSD をメモリ上に作る
+  const files: Record<string, Uint8Array> = {};
   for (let i = 0; i < pages.length; i++) {
-    onProgress(i + 1, pages.length);
-    await exportPsd(templateSvg, pages[i], size);
-    // 連続ダウンロードがブラウザに間引かれないよう、少し間を空ける
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    onProgress(`PSD を作成中…（${i + 1} / ${pages.length} ページ）`);
+    const buffer = await buildPsd(templateSvg, pages[i].participants, size);
+    files[psdFileName(pages[i].pageNumber)] = new Uint8Array(buffer);
   }
+
+  // fflate の非同期の zip で ZIP にする（圧縮レベル 6。フォルダは作らない）
+  onProgress("ZIP にまとめています…");
+  const { zip } = await import("fflate");
+  const zipped = await new Promise<Uint8Array>((resolve, reject) => {
+    zip(files, { level: 6 }, (err, data) => (err ? reject(err) : resolve(data)));
+  });
+  downloadBlob(new Blob([zipped as BlobPart], { type: "application/zip" }), ZIP_FILE_NAME);
 }

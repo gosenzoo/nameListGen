@@ -3,11 +3,9 @@
 // 1 ページ分のプレビュー（ガイド表示・保存ボタンつき。spec.md 4章）
 import { useEffect, useRef } from "react";
 // ガイドの位置（spec.md 6章・7.1）。寸法は lib/layout.ts にまとめてある
+// ブロック枠はテンプレートのブロックの位置・大きさで描く（spec.md 18.4）
+import type { BlockItem } from "@/lib/templateModel";
 import {
-  BLOCK_HEIGHT as BLOCK_H,
-  BLOCK_WIDTH as BLOCK_W,
-  BLOCK_XS,
-  BLOCK_YS,
   PAGE_HEIGHT,
   PAGE_WIDTH,
   SAFE, // 安全領域
@@ -18,12 +16,13 @@ type Props = {
   pageNumber: number;
   svg: SVGSVGElement;
   showGuide: boolean;
+  blocks: BlockItem[]; // ガイドのブロック枠（参加者を描かないブロックも含む）
   disabled: boolean;
   onSave: () => void;
   onSavePsd: () => void; // PSD で保存（F-11）
 };
 
-export default function PagePreview({ pageNumber, svg, showGuide, disabled, onSave, onSavePsd }: Props) {
+export default function PagePreview({ pageNumber, svg, showGuide, blocks, disabled, onSave, onSavePsd }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // 描画済みの <svg> 要素をそのまま表示領域に入れる（PNG 書き出しでも同じ要素を使う）
@@ -66,20 +65,18 @@ export default function PagePreview({ pageNumber, svg, showGuide, disabled, onSa
               strokeWidth={4}
               strokeDasharray="24 16"
             />
-            {BLOCK_YS.flatMap((y) =>
-              BLOCK_XS.map((x) => (
-                <rect
-                  key={`${x}-${y}`}
-                  x={x}
-                  y={y}
-                  width={BLOCK_W}
-                  height={BLOCK_H}
-                  fill="none"
-                  stroke="#22c55e"
-                  strokeWidth={4}
-                />
-              )),
-            )}
+            {blocks.map((b) => (
+              <rect
+                key={b.id}
+                x={b.x}
+                y={b.y}
+                width={b.width}
+                height={b.height}
+                fill="none"
+                stroke="#22c55e"
+                strokeWidth={4}
+              />
+            ))}
           </svg>
         )}
       </div>

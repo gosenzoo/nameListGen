@@ -10,11 +10,12 @@ type NumberFieldProps = {
   value: number;
   min?: number;
   onChange: (value: number) => void;
+  onFocus?: () => void; // 入力欄にフォーカスしたとき（縦横比を保つ計算の基準を覚えるのに使う）
 };
 
 // 数値の入力欄
 // 入力中は打ちかけの文字（空欄や "-" など）を保持し、数値として読めたときだけ反映する
-export function NumberField({ label, value, min, onChange }: NumberFieldProps) {
+export function NumberField({ label, value, min, onChange, onFocus }: NumberFieldProps) {
   const [draft, setDraft] = useState<string | null>(null);
   return (
     <label className="flex flex-col gap-0.5 text-xs text-zinc-600">
@@ -24,7 +25,10 @@ export function NumberField({ label, value, min, onChange }: NumberFieldProps) {
         className={inputClass}
         value={draft ?? String(value)}
         min={min}
-        onFocus={() => setDraft(String(value))}
+        onFocus={() => {
+          setDraft(String(value));
+          onFocus?.();
+        }}
         onBlur={() => setDraft(null)}
         onChange={(e) => {
           setDraft(e.target.value);

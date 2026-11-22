@@ -1,17 +1,21 @@
 "use client";
 
-// 選択中のパーツのプロパティ欄（spec.md 14.3）
+// 選択中のパーツのプロパティ欄（spec.md 14.3・18.2）
 import { useRef, useState } from "react";
 import { dataUrlBytes, IMAGE_ACCEPT } from "@/lib/imageFile";
-import type { FontWeight, ImagePart, TemplatePart, TextAlign, TextContent } from "@/lib/templateModel";
-import { CONTENT_LABELS, partLabel } from "../partLabel";
+import type { BlockItem, FontWeight, ImagePart, TextAlign, TextContent } from "@/lib/templateModel";
+import { CONTENT_LABELS } from "../partLabel";
+import type { BlockLabel, CanvasItem } from "./EditorCanvas";
 import { ColorField, NumberField } from "./Fields";
 
 type Props = {
-  part: TemplatePart | null;
+  part: CanvasItem | null;
+  label: string; // 見出しに出す表示名（ブロックは番号つき）
+  blockLabel: BlockLabel | null; // ブロックのときの番号（spec.md 18.2）
+  fixedTextOnly: boolean; // テキストの内容を固定の文字列に限るか（ページ上の要素。spec.md 18.2）
   canMoveForward: boolean;
   canMoveBackward: boolean;
-  onChange: (part: TemplatePart) => void;
+  onChange: (part: CanvasItem) => void;
   onMoveForward: () => void;
   onMoveBackward: () => void;
   onDelete: () => void;
@@ -22,6 +26,9 @@ const selectClass = "w-full rounded border border-zinc-400 px-2 py-1 text-sm";
 
 export default function PropertyPanel({
   part,
+  label,
+  blockLabel,
+  fixedTextOnly,
   canMoveForward,
   canMoveBackward,
   onChange,
@@ -36,7 +43,7 @@ export default function PropertyPanel({
 
   return (
     <div className="flex flex-col gap-3">
-      <h2 className="text-sm font-bold">{partLabel(part)}</h2>
+      <h2 className="text-sm font-bold">{label}</h2>
 
       {/* 位置（全種類共通） */}
       <div className="grid grid-cols-2 gap-2">
@@ -67,6 +74,8 @@ export default function PropertyPanel({
 
       {part.kind === "image" && <ImageProperties part={part} onChange={onChange} onReplaceImage={onReplaceImage} />}
 
+      {part.kind === "block" && <BlockProperties part={part} blockLabel={blockLabel} onChange={onChange} />}
+
       {part.kind === "text" && (
         <>
           <label className="flex flex-col gap-0.5 text-xs text-zinc-600">
@@ -76,7 +85,8 @@ export default function PropertyPanel({
               value={part.content}
               onChange={(e) => onChange({ ...part, content: e.target.value as TextContent })}
             >
-              {(Object.keys(CONTENT_LABELS) as TextContent[]).map((c) => (
+              {/* ページ上のテキストは固定の文字列だけ（spec.md 18.2） */}
+              {(fixedTextOnly ? (["fixed"] as TextContent[]) : (Object.keys(CONTENT_LABELS) as TextContent[])).map((c) => (
                 <option key={c} value={c}>
                   {CONTENT_LABELS[c]}
                 </option>
@@ -155,6 +165,62 @@ export default function PropertyPanel({
   );
 }
 
+// 幅・高さの入力。縦横比を保つときは、変更直前の比に合わせてもう一方を計算する（整数に丸める）
+// 比は入力欄にフォーカスした時点の幅 : 高さを使う（1 文字ずつ入力したときに、途中の値の丸めで比がずれないようにする）
+function SizeFields({ part, onChange }: { part: ImagePart | BlockItem; onChange: (part: CanvasItem) => void }) {
+  const ratioRef = useRef<number | null>(null);
+  const rememberRatio = () => {
+    ratioRef.current = part.width / part.height;
+  };
+  const changeWidth = (width: number) => {
+    const ratio = ratioRef.current ?? part.width / part.height;
+    const height = part.keepAspect ? Math.max(1, Math.round(width / ratio)) : part.height;
+    onChange({ ...part, width, height });
+  };
+  const changeHeight = (height: number) => {
+    const ratio = ratioRef.current ?? part.width / part.height;
+    const width = part.keepAspect ? Math.max(1, Math.round(height * ratio)) : part.width;
+    onChange({ ...part, width, height });
+  };
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        <NumberField label="幅" value={part.width} min={1} onChange={changeWidth} onFocus={rememberRatio} />
+        <NumberField label="高さ" value={part.height} min={1} onChange={changeHeight} onFocus={rememberRatio} />
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={part.keepAspect} onChange={(e) => onChange({ ...part, keepAspect: e.target.checked })} />
+        縦横比を保つ
+      </label>
+    </>
+  );
+}
+
+// ブロックの属性（spec.md 18.2・18.3）
+function BlockProperties({
+  part,
+  blockLabel,
+  onChange,
+}: {
+  part: BlockItem;
+  blockLabel: BlockLabel | null;
+  onChange: (part: CanvasItem) => void;
+}) {
+  return (
+    <>
+      {blockLabel && (
+        <p className="text-xs text-zinc-600">
+          {blockLabel.drawn
+            ? `各ページの ${blockLabel.number} 人目の参加者を描きます`
+            : "1 ページあたりの参加者数を超える番号のため、何も描きません"}
+        </p>
+      )}
+      <SizeFields part={part} onChange={onChange} />
+      <p className="text-xs text-zinc-500">ブロックの中身は、大きさ ÷ 基準サイズの倍率で拡大縮小して描きます</p>
+    </>
+  );
+}
+
 // 画像（固定）パーツの属性（spec.md 14.3.1）
 function ImageProperties({
   part,
@@ -162,23 +228,13 @@ function ImageProperties({
   onReplaceImage,
 }: {
   part: ImagePart;
-  onChange: (part: TemplatePart) => void;
+  onChange: (part: CanvasItem) => void;
   onReplaceImage: (file: File) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   // 元の大きさ（縮小表示の読み込み後にわかる）。どの画像の大きさかを href とあわせて持つ
   const [natural, setNatural] = useState<{ href: string; width: number; height: number } | null>(null);
   const naturalSize = natural?.href === part.href ? natural : null;
-
-  // 縦横比を保つときは、変更直前の比に合わせてもう一方を計算する（整数に丸める）
-  const changeWidth = (width: number) => {
-    const height = part.keepAspect ? Math.max(1, Math.round((width * part.height) / part.width)) : part.height;
-    onChange({ ...part, width, height });
-  };
-  const changeHeight = (height: number) => {
-    const width = part.keepAspect ? Math.max(1, Math.round((height * part.width) / part.height)) : part.width;
-    onChange({ ...part, width, height });
-  };
 
   return (
     <>
@@ -213,14 +269,7 @@ function ImageProperties({
           if (file) onReplaceImage(file);
         }}
       />
-      <div className="grid grid-cols-2 gap-2">
-        <NumberField label="幅" value={part.width} min={1} onChange={changeWidth} />
-        <NumberField label="高さ" value={part.height} min={1} onChange={changeHeight} />
-      </div>
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={part.keepAspect} onChange={(e) => onChange({ ...part, keepAspect: e.target.checked })} />
-        縦横比を保つ
-      </label>
+      <SizeFields part={part} onChange={onChange} />
     </>
   );
 }
