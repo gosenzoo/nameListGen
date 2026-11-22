@@ -20,9 +20,10 @@ type Props = {
   showGuide: boolean;
   disabled: boolean;
   onSave: () => void;
+  onSavePsd: () => void; // PSD で保存（F-11）
 };
 
-export default function PagePreview({ pageNumber, svg, showGuide, disabled, onSave }: Props) {
+export default function PagePreview({ pageNumber, svg, showGuide, disabled, onSave, onSavePsd }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // 描画済みの <svg> 要素をそのまま表示領域に入れる（PNG 書き出しでも同じ要素を使う）
@@ -84,14 +85,24 @@ export default function PagePreview({ pageNumber, svg, showGuide, disabled, onSa
       </div>
       <figcaption className="flex items-center justify-between text-sm">
         <span>{pageNumber} ページ</span>
-        <button
-          type="button"
-          className="rounded border border-zinc-400 px-3 py-1 hover:bg-zinc-100 disabled:opacity-50"
-          disabled={disabled}
-          onClick={onSave}
-        >
-          保存
-        </button>
+        <span className="flex gap-2">
+          <button
+            type="button"
+            className="rounded border border-zinc-400 px-3 py-1 hover:bg-zinc-100 disabled:opacity-50"
+            disabled={disabled}
+            onClick={onSave}
+          >
+            保存
+          </button>
+          <button
+            type="button"
+            className="rounded border border-zinc-400 px-3 py-1 hover:bg-zinc-100 disabled:opacity-50"
+            disabled={disabled}
+            onClick={onSavePsd}
+          >
+            PSD で保存
+          </button>
+        </span>
       </figcaption>
     </figure>
   );

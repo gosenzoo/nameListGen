@@ -272,7 +272,9 @@ function buildPart(part: TemplatePart): string {
 }
 
 // 編集用データからテンプレートの SVG を組み立てる（spec.md 7.3 の形式）
-export function buildTemplateSvg(model: TemplateModel): string {
+// withBackground: false のときはページの背景を入れない（PSD のレイヤー用に、パーツだけを描くとき。spec.md 17.5）
+export function buildTemplateSvg(model: TemplateModel, options: { withBackground?: boolean } = {}): string {
+  const withBackground = options.withBackground ?? true;
   const parts = model.parts.map(buildPart).join("\n\n");
   const calls = BLOCK_ORIGINS.map(
     ({ x, y }, i) =>
@@ -290,9 +292,13 @@ export function buildTemplateSvg(model: TemplateModel): string {
     </clipPath>
   </defs>
 
-  <!-- 背景（塗り足し込み） -->
+${
+  withBackground
+    ? `  <!-- 背景（塗り足し込み） -->
   <rect lcdParts="static" x="0" y="0" width="${PAGE_WIDTH}" height="${PAGE_HEIGHT}" fill="${attr(model.pageBackground)}" />
-
+`
+    : ""
+}
   <!-- 関数呼び出し・funcArea・textArea・textLine の塗りは、配置を確認するための透明度 0.2 の目印（spec.md 7.3）。
        描画エンジンは描画しないため、プレビューと PNG には出ない -->
 

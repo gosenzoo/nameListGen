@@ -9,7 +9,8 @@ const DPI = 350;
 // 埋め込み用フォントの取得は一度だけ行う
 let capturePromise: Promise<LcdCapture> | null = null;
 
-function getCapture(): Promise<LcdCapture> {
+// PSD 書き出し（lib/exportPsd.ts）でも同じものを使う
+export function getCapture(): Promise<LcdCapture> {
   if (!capturePromise) {
     capturePromise = (async () => {
       const capture = new LcdCapture();
@@ -31,13 +32,16 @@ export async function exportPng(svg: SVGSVGElement, pageNumber: number): Promise
   const blob: Blob | null = await capture.capture(svg, { width: PAGE_WIDTH, height: PAGE_HEIGHT });
   if (!blob) throw new Error("PNG を作成できませんでした");
   const png = await setPngDpi(blob, DPI);
+  downloadBlob(png, pngFileName(pageNumber));
+}
 
-  // <a download> でダウンロードする
-  const url = URL.createObjectURL(png);
+// <a download> でダウンロードする（PSD 書き出しでも使う）
+export function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
   try {
     const a = document.createElement("a");
     a.href = url;
-    a.download = pngFileName(pageNumber);
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     a.remove();
