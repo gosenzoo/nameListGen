@@ -11,11 +11,14 @@ import SettingsPanel from "./components/SettingsPanel";
 import { partLabel } from "./partLabel";
 import { PAGE_HEIGHT, PAGE_WIDTH } from "@/lib/layout";
 import {
+  arrangeBlocks,
   buildTemplateSvg,
   createImagePart,
   createPageItem,
   createPart,
+  explodeArrange,
   parseTemplate,
+  type BlockItem,
   type PageItem,
   type TemplateModel,
   type TemplatePart,
@@ -170,22 +173,45 @@ export default function TemplateEditorPage() {
   };
 
   // ブロックの番号（ページ上の要素のうちブロックだけを描画順に数える。spec.md 18.2）
-  const blockLabels = useMemo(() => {
+  // 等間隔配置は中のブロックを横優先の連番で数える（spec.md 19.4）
+  const { blockLabels, arrangeInner } = useMemo(() => {
     const labels = new Map<string, BlockLabel>();
-    if (!model) return labels;
+    const inner = new Map<string, { block: BlockItem; label: BlockLabel }[]>();
+    if (!model) return { blockLabels: labels, arrangeInner: inner };
     let n = 0;
     for (const item of model.pageItems) {
-      if (item.kind !== "block") continue;
-      n += 1;
-      labels.set(item.id, { number: n, drawn: n <= model.entriesPerPage });
+      if (item.kind === "block") {
+        n += 1;
+        labels.set(item.id, { number: n, drawn: n <= model.entriesPerPage });
+      } else if (item.kind === "arrange") {
+        inner.set(
+          item.id,
+          arrangeBlocks(item, model).map((block) => {
+            n += 1;
+            return { block, label: { number: n, drawn: n <= model.entriesPerPage } };
+          }),
+        );
+      }
     }
-    return labels;
+    return { blockLabels: labels, arrangeInner: inner };
   }, [model]);
 
-  // パーツ一覧・プロパティ欄の表示名（ブロックは番号つき。spec.md 18.6）
+  // パーツ一覧・プロパティ欄の表示名（ブロック・等間隔配置は番号つき。spec.md 18.6・19.5）
   const labelOf = (part: CanvasItem): string => {
     const label = blockLabels.get(part.id);
     if (part.kind === "block" && label) return `ブロック ${label.number}${label.drawn ? "" : "（描画なし）"}`;
+    if (part.kind === "arrange") {
+      const inner = arrangeInner.get(part.id) ?? [];
+      if (inner.length === 0) return "等間隔配置（ブロックなし）";
+      const first = inner[0].label.number;
+      const last = inner[inner.length - 1].label.number;
+      const range = first === last ? `ブロック ${first}` : `ブロック ${first}〜${last}`;
+      // 人数を超える番号（描画なし）を含む場合は、その範囲を添える
+      const undrawn = inner.filter((b) => !b.label.drawn).map((b) => b.label.number);
+      if (undrawn.length === 0) return `等間隔配置（${range}）`;
+      const u = undrawn.length === 1 ? `${undrawn[0]}` : `${undrawn[0]}〜${undrawn[undrawn.length - 1]}`;
+      return `等間隔配置（${range}。${u} は描画なし）`;
+    }
     return partLabel(part);
   };
 
@@ -510,6 +536,7 @@ export default function TemplateEditorPage() {
                 editMode === "page"
                   ? ([
                       { label: "＋ブロック", onClick: () => addItem(createPageItem("block", model)) },
+                      { label: "＋等間隔配置", onClick: () => addItem(createPageItem("arrange", model)) },
                       { label: "＋塗り", onClick: () => addItem(createPageItem("rect", model)) },
                       { label: "＋テキスト", onClick: () => addItem(createPageItem("text", model)) },
                     ] satisfies AddButton[])
@@ -535,6 +562,7 @@ export default function TemplateEditorPage() {
               sampleCount={canvasView.sampleCount}
               items={items}
               blockLabels={editMode === "page" ? blockLabels : new Map()}
+              arrangeInner={editMode === "page" ? arrangeInner : new Map()}
               selectedId={selectedId}
               onSelect={setSelectedId}
               onDragStart={recordSnapshot}
@@ -558,6 +586,13 @@ export default function TemplateEditorPage() {
             onMoveForward={() => movePartOrder(1)}
             onMoveBackward={() => movePartOrder(-1)}
             onReplaceImage={(file) => void replaceImage(file)}
+            arrangeInnerBlocks={selectedPart ? (arrangeInner.get(selectedPart.id) ?? []).map((b) => b.block) : []}
+            onExplodeArrange={() => {
+              // 等間隔配置を個別のブロックに分解する（spec.md 19.5）
+              if (!selectedPart || selectedPart.kind !== "arrange") return;
+              applyModel(explodeArrange(model, selectedPart.id));
+              setSelectedId(null);
+            }}
             onDelete={() => {
               applyModel(withItems(model, items.filter((p) => p.id !== selectedId)));
               setSelectedId(null);

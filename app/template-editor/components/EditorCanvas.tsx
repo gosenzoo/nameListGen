@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { renderTemplatePreview, type ViewArea } from "@/lib/render";
 import { getSampleParticipants } from "@/lib/sampleData";
-import type { PageItem, TemplatePart } from "@/lib/templateModel";
+import type { BlockItem, PageItem, TemplatePart } from "@/lib/templateModel";
 
 // キャンバスで操作する要素（ブロックの中のパーツ、またはページ上の要素）
 export type CanvasItem = TemplatePart | PageItem;
@@ -109,6 +109,7 @@ type Props = {
   sampleCount: number; // プレビューに使うダミーの参加者の人数
   items: CanvasItem[];
   blockLabels: Map<string, BlockLabel>; // ブロックの id → 番号
+  arrangeInner: Map<string, { block: BlockItem; label: BlockLabel }[]>; // 等間隔配置の id → 中のブロックと番号（spec.md 19.5）
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onDragStart: () => void; // ドラッグで最初に動いたとき（元に戻す用に、変更前の状態を記録する）
@@ -121,6 +122,7 @@ export default function EditorCanvas({
   sampleCount,
   items,
   blockLabels,
+  arrangeInner,
   selectedId,
   onSelect,
   onDragStart,
@@ -223,6 +225,24 @@ export default function EditorCanvas({
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
         >
+          {/* 等間隔配置の中のブロックの枠と番号（表示のみ。1 つずつは選べない。spec.md 19.5） */}
+          {items.map((part) =>
+            (arrangeInner.get(part.id) ?? []).map(({ block, label }) => (
+              <g key={block.id} className="pointer-events-none">
+                <rect
+                  x={block.x}
+                  y={block.y}
+                  width={block.width}
+                  height={block.height}
+                  fill="none"
+                  stroke="#0000ff"
+                  strokeWidth={2 * unit}
+                  strokeDasharray={`${10 * unit} ${8 * unit}`}
+                />
+                <BlockNumber x={block.x} y={block.y} unit={unit} label={label} />
+              </g>
+            )),
+          )}
           {/* 後ろのパーツほど前面にあるので、クリックは前面のパーツに当たる */}
           {items.map((part) => {
             const box = boxOf(part);
@@ -236,28 +256,14 @@ export default function EditorCanvas({
                   width={box.width}
                   height={box.height}
                   fill="transparent"
-                  stroke={isSelected ? "#2563eb" : part.kind === "block" ? "#0000ff" : "#64748b"}
+                  stroke={isSelected ? "#2563eb" : part.kind === "block" ? "#0000ff" : part.kind === "arrange" ? "#00a0a0" : "#64748b"}
                   strokeWidth={(isSelected ? 4 : 2) * unit}
                   strokeDasharray={isSelected ? undefined : `${10 * unit} ${8 * unit}`}
                   className="cursor-move"
                   onPointerDown={(e) => beginDrag(e, part, "move", null)}
                 />
                 {/* ブロックの番号（spec.md 18.2）。参加者を描かないブロックは「描画なし」 */}
-                {label && (
-                  <text
-                    x={box.x + 8 * unit}
-                    y={box.y + 44 * unit}
-                    fontSize={40 * unit}
-                    fontWeight={700}
-                    fill={label.drawn ? "#0000ff" : "#94a3b8"}
-                    stroke="#ffffff"
-                    strokeWidth={6 * unit}
-                    paintOrder="stroke"
-                    className="pointer-events-none"
-                  >
-                    {label.drawn ? label.number : `${label.number}（描画なし）`}
-                  </text>
-                )}
+                {label && <BlockNumber x={box.x} y={box.y} unit={unit} label={label} />}
               </g>
             );
           })}
@@ -285,5 +291,24 @@ export default function EditorCanvas({
       </div>
       {renderError && <p className="text-sm text-red-700">プレビューを描画できませんでした: {renderError}</p>}
     </div>
+  );
+}
+
+// ブロックの左上に出す番号（spec.md 18.2）。参加者を描かないブロックは「描画なし」
+function BlockNumber({ x, y, unit, label }: { x: number; y: number; unit: number; label: BlockLabel }) {
+  return (
+    <text
+      x={x + 8 * unit}
+      y={y + 44 * unit}
+      fontSize={40 * unit}
+      fontWeight={700}
+      fill={label.drawn ? "#0000ff" : "#94a3b8"}
+      stroke="#ffffff"
+      strokeWidth={6 * unit}
+      paintOrder="stroke"
+      className="pointer-events-none"
+    >
+      {label.drawn ? label.number : `${label.number}（描画なし）`}
+    </text>
   );
 }

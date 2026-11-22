@@ -19,6 +19,8 @@ export function partLabel(part: TemplatePart | PageItem): string {
       return "画像";
     case "block":
       return "ブロック";
+    case "arrange":
+      return "等間隔配置";
     case "text":
       return part.content === "fixed"
         ? `テキスト「${part.fixedText.split("\n")[0].slice(0, 10)}」`

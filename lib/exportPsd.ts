@@ -6,6 +6,7 @@ import { downloadBlob, getCapture } from "./exportPng";
 import { PAGE_HEIGHT, PAGE_WIDTH } from "./layout";
 import { renderTemplatePreview } from "./render";
 import {
+  arrangeBlocks,
   blocksOf,
   buildTemplateSvg,
   parseTemplate,
@@ -37,8 +38,8 @@ const ZIP_FILE_NAME = "afterword_psd.zip";
 
 export type PsdSize = { width: number; height: number };
 
-// レイヤーになる要素（ブロックの中身のパーツと、ブロック以外のページ上の要素）
-type LayerPart = Exclude<TemplatePart | PageItem, { kind: "block" }>;
+// レイヤーになる要素（ブロックの中身のパーツと、ブロック・等間隔配置以外のページ上の要素）
+type LayerPart = Exclude<TemplatePart | PageItem, { kind: "block" | "arrange" }>;
 
 // 範囲（ページ座標）
 type Box = { x: number; y: number; width: number; height: number };
@@ -213,12 +214,18 @@ async function buildPsd(templateSvg: string, participants: Participant[], size: 
     { name: "背景", canvas: filledCanvas(size.width, size.height, model.pageBackground) },
   ];
   let blockIndex = 0;
+  // 1 ブロック分のグループを足す（参加者を描かないブロックのグループは作らない）
+  const pushBlockGroup = () => {
+    const j = blockIndex++;
+    if (j >= drawnBlocks.length) return;
+    children.push({ name: `ブロック${j + 1}：${participants[j].name}`, opened: true, children: blockLayers[j] });
+  };
   for (const item of model.pageItems) {
     if (item.kind === "block") {
-      const j = blockIndex++;
-      // 参加者を描かないブロックのグループは作らない
-      if (j >= drawnBlocks.length) continue;
-      children.push({ name: `ブロック${j + 1}：${participants[j].name}`, opened: true, children: blockLayers[j] });
+      pushBlockGroup();
+    } else if (item.kind === "arrange") {
+      // 等間隔配置は、中のブロックの数だけグループを並べる（spec.md 19.4）
+      arrangeBlocks(item, model).forEach(pushBlockGroup);
     } else {
       // ページ上の要素はグループに入れずにレイヤーにする
       const { raster, drawnLines } = await renderOnly([], [item]);

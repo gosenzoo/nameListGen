@@ -1,5 +1,5 @@
 // テンプレートの SVG と編集用データの相互変換（spec.md 14.6・18.7）
-import { BLOCK_HEIGHT, BLOCK_WIDTH, PAGE_HEIGHT, PAGE_WIDTH } from "./layout";
+import { BLOCK_HEIGHT, BLOCK_WIDTH, PAGE_HEIGHT, PAGE_WIDTH, SAFE } from "./layout";
 
 // ---- 編集用のデータ ----
 
@@ -67,8 +67,23 @@ export type BlockItem = {
   keepAspect: boolean; // 縦横比を保って大きさを変えるか（data-keep-aspect）
 };
 
-// ページ上の要素（spec.md 18.2）。テキストは content が "fixed" のものだけ
-export type PageItem = BlockItem | RectPart | ImagePart | TextPart;
+// ブロックの等間隔配置（spec.md 19章）。範囲の中にブロックを列数 × 行数の格子状に並べる（常に横優先）
+export type ArrangeItem = {
+  id: string;
+  kind: "arrange";
+  x: number; // 範囲
+  y: number;
+  width: number;
+  height: number;
+  columns: number; // 列数
+  rows: number; // 行数
+  gapX: number; // 列間隔
+  gapY: number; // 行間隔
+  keepAspect: boolean; // ブロックの縦横比を基準サイズと同じにするか（data-keep-aspect）
+};
+
+// ページ上の要素（spec.md 18.2・19.6）。テキストは content が "fixed" のものだけ
+export type PageItem = BlockItem | ArrangeItem | RectPart | ImagePart | TextPart;
 
 export type TemplateModel = {
   pageBackground: string; // ページの背景色
@@ -83,13 +98,65 @@ export type TemplateModel = {
 export const ENTRIES_PER_PAGE_MIN = 1;
 export const ENTRIES_PER_PAGE_MAX = 100;
 
+// 等間隔配置の列数・行数の範囲と、ブロック数の上限（spec.md 19.2）
+export const ARRANGE_COUNT_MAX = 100;
+
+// 小数第 2 位で四捨五入する（spec.md 19.3）
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
+// 等間隔配置の中のブロックの位置と大きさを計算する（spec.md 19.3。横優先）
+// 枠が 1 未満になる指定や、ブロック数が上限を超える指定のときは空の配列（ブロックを置かない）
+// id は「等間隔配置の id-番号」（画面上の識別用）
+export function arrangeBlocks(
+  item: ArrangeItem,
+  model: Pick<TemplateModel, "blockWidth" | "blockHeight">,
+): BlockItem[] {
+  const { columns, rows } = item;
+  if (columns < 1 || rows < 1 || columns * rows > ARRANGE_COUNT_MAX) return [];
+  const cellW = (item.width - item.gapX * (columns - 1)) / columns;
+  const cellH = (item.height - item.gapY * (rows - 1)) / rows;
+  if (!(cellW >= 1 && cellH >= 1)) return [];
+
+  // 縦横比を保つときは、基準サイズの縦横比で枠に収まる最大の大きさにし、枠の中央に寄せる
+  let blockW = cellW;
+  let blockH = cellH;
+  if (item.keepAspect && model.blockWidth > 0 && model.blockHeight > 0) {
+    const scale = Math.min(cellW / model.blockWidth, cellH / model.blockHeight);
+    blockW = model.blockWidth * scale;
+    blockH = model.blockHeight * scale;
+  }
+  const offsetX = (cellW - blockW) / 2;
+  const offsetY = (cellH - blockH) / 2;
+
+  const blocks: BlockItem[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < columns; c++) {
+      blocks.push({
+        id: `${item.id}-${blocks.length}`,
+        kind: "block",
+        x: round2(item.x + c * (cellW + item.gapX) + offsetX),
+        y: round2(item.y + r * (cellH + item.gapY) + offsetY),
+        width: round2(blockW),
+        height: round2(blockH),
+        keepAspect: true,
+      });
+    }
+  }
+  return blocks;
+}
+
 // ページ上のブロックを、番号順（描画順）に取り出す（spec.md 18.2）
-export function blocksOf(model: Pick<TemplateModel, "pageItems">): BlockItem[] {
-  return model.pageItems.filter((item): item is BlockItem => item.kind === "block");
+// 等間隔配置は計算済みのブロックに展開する（spec.md 19.6）
+export function blocksOf(model: Pick<TemplateModel, "pageItems" | "blockWidth" | "blockHeight">): BlockItem[] {
+  return model.pageItems.flatMap((item) =>
+    item.kind === "block" ? [item] : item.kind === "arrange" ? arrangeBlocks(item, model) : [],
+  );
 }
 
 // 実際の 1 ページあたりの人数 = min(人数, ブロック数)（spec.md 18.4）
-export function effectiveEntriesPerPage(model: Pick<TemplateModel, "pageItems" | "entriesPerPage">): number {
+export function effectiveEntriesPerPage(
+  model: Pick<TemplateModel, "pageItems" | "entriesPerPage" | "blockWidth" | "blockHeight">,
+): number {
   return Math.min(model.entriesPerPage, blocksOf(model).length);
 }
 
@@ -230,6 +297,29 @@ export function parseTemplate(svgText: string): ParsedTemplate {
     const tag = el.tagName.toLowerCase();
     if (tag === "defs") continue;
 
+    // 等間隔配置の目印の rect（spec.md 19.6）。中のブロックは指定から計算し直す
+    if (el.getAttribute("data-arrange") === "1") {
+      const int = (name: string, fallback: number) => Math.max(1, Math.round(num(el, name, fallback)));
+      pageItems.push({
+        id: newPartId(),
+        kind: "arrange",
+        x: num(el, "x"),
+        y: num(el, "y"),
+        width: num(el, "width"),
+        height: num(el, "height"),
+        columns: int("data-arrange-columns", 1),
+        rows: int("data-arrange-rows", 1),
+        gapX: Math.max(0, num(el, "data-arrange-gap-x")),
+        gapY: Math.max(0, num(el, "data-arrange-gap-y")),
+        // 属性がない場合はオンとして読む
+        keepAspect: el.getAttribute("data-keep-aspect") !== "0",
+      });
+      continue;
+    }
+
+    // 等間隔配置の中のブロック（関数呼び出し）は読み飛ばす（目印の rect から計算し直す）
+    if (el.getAttribute("lcd-funcCall") === FUNC_NAME && el.getAttribute("data-arrange-member") === "1") continue;
+
     // 関数呼び出しはページ上のブロック（lcd-arg の番号は読まず、出てきた順に番号を振り直す。spec.md 18.7）
     if (el.getAttribute("lcd-funcCall") === FUNC_NAME) {
       pageItems.push({
@@ -282,7 +372,8 @@ export function parseTemplate(svgText: string): ParsedTemplate {
   }
 
   // 1 ページあたりの参加者数。属性がない古いテンプレートはブロックの数（spec.md 18.4）
-  const blockCount = pageItems.filter((i) => i.kind === "block").length;
+  // ブロック数には等間隔配置の中のブロックも含める（spec.md 19.4）
+  const blockCount = blocksOf({ pageItems, blockWidth, blockHeight }).length;
   const perPageAttr = parseInt(root.getAttribute("data-entries-per-page") ?? "", 10);
   const entriesPerPage = Number.isFinite(perPageAttr)
     ? Math.min(ENTRIES_PER_PAGE_MAX, Math.max(ENTRIES_PER_PAGE_MIN, perPageAttr))
@@ -342,11 +433,23 @@ function buildPart(part: TemplatePart): string {
 }
 
 // ページ上の要素 1 つ分の SVG（ページ座標。blockIndex: ブロックの番号 - 1）
-function buildPageItem(item: PageItem, blockIndex: number): string {
-  if (item.kind !== "block") return buildPart(item);
+// 1 ブロック分の関数呼び出し（member: 等間隔配置の中のブロックか。spec.md 19.6）
+function buildBlockCall(block: BlockItem, blockIndex: number, member: boolean): string {
+  const memberAttr = member ? ` data-arrange-member="1"` : "";
   return `  <!-- ブロック ${blockIndex + 1}（${blockIndex + 1} 人目の参加者） -->
-  <rect lcd-funcCall="${FUNC_NAME}" lcd-arg="entry:entries[${blockIndex}]" x="${attr(item.x)}" y="${attr(item.y)}" width="${attr(item.width)}" height="${attr(item.height)}" fill="#0000ff33"
-        data-keep-aspect="${item.keepAspect ? "1" : "0"}" />`;
+  <rect lcd-funcCall="${FUNC_NAME}" lcd-arg="entry:entries[${blockIndex}]"${memberAttr} x="${attr(block.x)}" y="${attr(block.y)}" width="${attr(block.width)}" height="${attr(block.height)}" fill="#0000ff33"
+        data-keep-aspect="${block.keepAspect ? "1" : "0"}" />`;
+}
+
+// 等間隔配置 1 つ分の SVG（範囲の目印の rect と、計算済みの関数呼び出し。spec.md 19.6）
+// firstIndex: 中の最初のブロックの番号 - 1
+function buildArrange(item: ArrangeItem, blocks: BlockItem[], firstIndex: number): string {
+  const range = blocks.length > 0 ? `ブロック ${firstIndex + 1}〜${firstIndex + blocks.length}` : "ブロックなし";
+  const marker = `  <!-- 等間隔配置（${item.columns} 列 × ${item.rows} 行。${range}） -->
+  <rect data-arrange="1" data-arrange-columns="${attr(item.columns)}" data-arrange-rows="${attr(item.rows)}"
+        data-arrange-gap-x="${attr(item.gapX)}" data-arrange-gap-y="${attr(item.gapY)}" data-keep-aspect="${item.keepAspect ? "1" : "0"}"
+        x="${attr(item.x)}" y="${attr(item.y)}" width="${attr(item.width)}" height="${attr(item.height)}" fill="#00c0c033" />`;
+  return [marker, ...blocks.map((b, i) => buildBlockCall(b, firstIndex + i, true))].join("\n");
 }
 
 // 編集用データからテンプレートの SVG を組み立てる（spec.md 7.3 の形式）
@@ -355,9 +458,19 @@ export function buildTemplateSvg(model: TemplateModel, options: { withBackground
   const withBackground = options.withBackground ?? true;
   const parts = model.parts.map(buildPart).join("\n\n");
   // ページ上の要素。ブロックには描画順に entries[0], entries[1] … を振る（spec.md 18.2）
+  // 等間隔配置は中のブロックの数だけ番号を進める（spec.md 19.4）
   let blockIndex = 0;
   const items = model.pageItems
-    .map((item) => buildPageItem(item, item.kind === "block" ? blockIndex++ : -1))
+    .map((item) => {
+      if (item.kind === "block") return buildBlockCall(item, blockIndex++, false);
+      if (item.kind === "arrange") {
+        const blocks = arrangeBlocks(item, model);
+        const svg = buildArrange(item, blocks, blockIndex);
+        blockIndex += blocks.length;
+        return svg;
+      }
+      return buildPart(item);
+    })
     .join("\n\n");
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}" width="${PAGE_WIDTH}" height="${PAGE_HEIGHT}" data-entries-per-page="${attr(model.entriesPerPage)}">
@@ -397,9 +510,28 @@ ${items}
 // ---- 新しいパーツの既定値 ----
 
 // 新しいページ上の要素（spec.md 18.2）。ブロックの大きさは基準サイズ、テキストは固定の文字列
-export function createPageItem(kind: "block" | "rect" | "text", model: Pick<TemplateModel, "blockWidth" | "blockHeight">): PageItem {
+export function createPageItem(
+  kind: "block" | "arrange" | "rect" | "text",
+  model: Pick<TemplateModel, "blockWidth" | "blockHeight">,
+): PageItem {
   if (kind === "block") {
     return { id: newPartId(), kind, x: 0, y: 0, width: model.blockWidth, height: model.blockHeight, keepAspect: true };
+  }
+  if (kind === "arrange") {
+    // 初期値は標準テンプレートと同じ配置（安全領域・2 列 × 4 行。spec.md 19.5）
+    return {
+      id: newPartId(),
+      kind,
+      x: SAFE,
+      y: SAFE,
+      width: PAGE_WIDTH - SAFE * 2,
+      height: PAGE_HEIGHT - SAFE * 2,
+      columns: 2,
+      rows: 4,
+      gapX: 111,
+      gapY: 116,
+      keepAspect: true,
+    };
   }
   return createPart(kind) as RectPart | TextPart;
 }
@@ -433,4 +565,17 @@ export function createPart(kind: Exclude<TemplatePart["kind"], "image">): Templa
 // 読み込んだ画像から画像（固定）パーツを作る。大きさは画像の元の大きさ（spec.md 14.3.1）
 export function createImagePart(image: { href: string; width: number; height: number }): ImagePart {
   return { id: newPartId(), kind: "image", href: image.href, x: 0, y: 0, width: image.width, height: image.height, keepAspect: true };
+}
+
+// 等間隔配置を、計算済みの位置・大きさの個別のブロックに置き換える（spec.md 19.5）
+// 描画順の位置は変えないので、番号も変わらない
+export function explodeArrange(model: TemplateModel, arrangeId: string): TemplateModel {
+  return {
+    ...model,
+    pageItems: model.pageItems.flatMap((item) =>
+      item.kind === "arrange" && item.id === arrangeId
+        ? arrangeBlocks(item, model).map((b) => ({ ...b, id: newPartId() }))
+        : [item],
+    ),
+  };
 }
