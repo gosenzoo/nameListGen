@@ -8,6 +8,7 @@ import FileSelector from "./components/FileSelector";
 import MessageList from "./components/MessageList";
 import PagePreview from "./components/PagePreview";
 import PsdSizeDialog from "./components/PsdSizeDialog";
+import StartBlockInput from "./components/StartBlockInput";
 import TemplateSelector, { BUILTIN_VALUE } from "./components/TemplateSelector";
 import { parseCsvFile } from "@/lib/csv";
 import { exportAllPngs, exportPng } from "@/lib/exportPng";
@@ -64,6 +65,10 @@ export default function Home() {
   const [templateValue, setTemplateValue] = useState(BUILTIN_VALUE);
   const [templates, setTemplates] = useState<StoredTemplateSummary[]>([]);
   const [storeMessage, setStoreMessage] = useState<string | null>(null);
+  // 開始位置（1 人目を置くブロックの番号。F-15。spec.md 20章）。ブラウザには覚えない
+  const [startBlock, setStartBlock] = useState(1);
+  // 選んだテンプレートの実際の 1 ページあたりの人数（開始位置の上限。読めていないときは null）
+  const [perPage, setPerPage] = useState<number | null>(null);
 
   // 保存済みテンプレートの一覧を取得し、前回選んだテンプレートを復元する
   useEffect(() => {
@@ -86,6 +91,30 @@ export default function Home() {
     })();
   }, []);
 
+  // テンプレートを選んだら、実際の 1 ページあたりの人数を読み、開始位置の上限にする（spec.md 20.2）
+  // CSV を読み込む前から上限を出せるようにするため、描画とは別に読む
+  useEffect(() => {
+    let cancelled = false;
+    const ref: TemplateRef = templates.some((t) => t.id === templateValue)
+      ? { kind: "stored", id: templateValue, name: "" }
+      : { kind: "builtin" };
+    loadTemplateSvg(ref)
+      .then((svg) => {
+        if (cancelled) return;
+        const n = effectiveEntriesPerPage(parseTemplate(svg).model);
+        setPerPage(n >= 1 ? n : null);
+        // 人数が開始位置より少なくなったら、開始位置を人数に丸める
+        if (n >= 1) setStartBlock((s) => Math.min(s, n));
+      })
+      .catch(() => {
+        // 読めなくても描画時にエラーを表示するので、ここでは上限を出さないだけにする
+        if (!cancelled) setPerPage(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [templateValue, templates]);
+
   // 選択欄の値をテンプレートの参照に変換する
   const toTemplateRef = (value: string): TemplateRef => {
     const found = templates.find((t) => t.id === value);
@@ -93,12 +122,16 @@ export default function Home() {
   };
 
   // 参加者をページ割りし、テンプレートで描画する
-  const render = async (participants: Participant[], value: string) => {
+  // start: 開始位置（spec.md 20.3）。1 ページの人数を超えるときは人数に丸める
+  const render = async (participants: Participant[], value: string, start: number) => {
     const templateSvg = await loadTemplateSvg(toTemplateRef(value));
     // テンプレートから人数とブロックを読み、実際の 1 ページあたりの人数で区切る（spec.md 18.4）
     // ブロックが 0 個なら paginate がエラーにする（プレビューと書き出しはしない）
     const { model } = parseTemplate(templateSvg);
-    const paged = paginate(participants, effectiveEntriesPerPage(model));
+    const n = effectiveEntriesPerPage(model);
+    const clampedStart = n >= 1 ? Math.min(start, n) : start;
+    if (clampedStart !== start) setStartBlock(clampedStart);
+    const paged = paginate(participants, n, clampedStart);
     setPages(await renderPages(paged, templateSvg));
     setRenderedTemplate(templateSvg);
     setPageData(paged);
@@ -115,7 +148,7 @@ export default function Home() {
     try {
       const result = await parseCsvFile(file);
       setParseResult(result);
-      await render(result.participants, templateValue);
+      await render(result.participants, templateValue, startBlock);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -131,7 +164,22 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      await render(parseResult.participants, value);
+      await render(parseResult.participants, value, startBlock);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 開始位置を変えたら、読み込み済みの CSV を描画し直す（spec.md 20.2）
+  const handleStartBlockChange = async (value: number) => {
+    setStartBlock(value);
+    if (!parseResult) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await render(parseResult.participants, templateValue, value);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -196,6 +244,12 @@ export default function Home() {
           onChange={handleTemplateChange}
         />
         {storeMessage && <p className="text-sm text-zinc-600">{storeMessage}</p>}
+        <StartBlockInput
+          value={startBlock}
+          max={perPage}
+          disabled={loading || exporting}
+          onChange={handleStartBlockChange}
+        />
       </div>
 
       {error && <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</p>}

@@ -22,7 +22,7 @@ export type ParseResult = {
 // 1 ページ分
 export type Page = {
   pageNumber: number; // 1 始まり（ファイル名に使う）
-  participants: Participant[]; // 最大 8 人
+  participants: (Participant | null)[]; // ブロックの番号順。null は空欄にするブロック（開始位置より前。spec.md 20.3）
 };
 
 // はみ出した項目

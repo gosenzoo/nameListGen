@@ -127,7 +127,7 @@ function readDrawnLines(svg: SVGSVGElement): DrawnLine[] {
 }
 
 // 1 ページ分の PSD を作る
-async function buildPsd(templateSvg: string, participants: Participant[], size: PsdSize): Promise<ArrayBuffer> {
+async function buildPsd(templateSvg: string, participants: (Participant | null)[], size: PsdSize): Promise<ArrayBuffer> {
   const { writePsd } = await import("ag-psd");
   const capture = await getCapture();
   const { model } = parseTemplate(templateSvg);
@@ -197,8 +197,11 @@ async function buildPsd(templateSvg: string, participants: Participant[], size: 
     const { raster, drawnLines } = await renderOnly([part], blocks);
     const box = partBox(part);
     drawnBlocks.forEach((block, j) => {
+      // 空欄にするブロック（開始位置より前）はレイヤーを作らない（spec.md 20.4）
+      const participant = participants[j];
+      if (!participant) return;
       // アイコンのない参加者のアイコンは描かれないので、レイヤーを作らない（spec.md 17.3）
-      if (part.kind === "icon" && !participants[j].icon) return;
+      if (part.kind === "icon" && !participant.icon) return;
       // ブロックの倍率（ブロックの大きさ ÷ 基準サイズ。spec.md 18.3）で、ブロック内の座標をページ座標にする
       const sx = model.blockWidth > 0 ? block.width / model.blockWidth : 1;
       const sy = model.blockHeight > 0 ? block.height / model.blockHeight : 1;
@@ -214,11 +217,12 @@ async function buildPsd(templateSvg: string, participants: Participant[], size: 
     { name: "背景", canvas: filledCanvas(size.width, size.height, model.pageBackground) },
   ];
   let blockIndex = 0;
-  // 1 ブロック分のグループを足す（参加者を描かないブロックのグループは作らない）
+  // 1 ブロック分のグループを足す（参加者を描かないブロック・空欄にするブロックのグループは作らない。spec.md 20.4）
   const pushBlockGroup = () => {
     const j = blockIndex++;
-    if (j >= drawnBlocks.length) return;
-    children.push({ name: `ブロック${j + 1}：${participants[j].name}`, opened: true, children: blockLayers[j] });
+    const participant = participants[j];
+    if (j >= drawnBlocks.length || !participant) return;
+    children.push({ name: `ブロック${j + 1}：${participant.name}`, opened: true, children: blockLayers[j] });
   };
   for (const item of model.pageItems) {
     if (item.kind === "block") {

@@ -51,9 +51,10 @@ function waitForFonts(): Promise<void> {
 }
 
 // 描画エンジンへ渡すデータに変換する（spec.md 5.3）
-function toDrawParams(participants: Participant[]) {
+// 空欄にするブロック（null）は null のまま渡す。lcd-arg の値が null の関数呼び出しは描かれない（spec.md 20.4）
+function toDrawParams(participants: (Participant | null)[]) {
   return {
-    entries: participants.map((p) => ({
+    entries: participants.map((p) => p && ({
       line: p.line,
       name: p.name,
       contact: p.contact,
@@ -64,7 +65,7 @@ function toDrawParams(participants: Participant[]) {
 }
 
 // 1 ページ分を描画する
-function drawPage(drawer: Drawer, participants: Participant[]): { svg: SVGSVGElement; overflows: OverflowInfo[] } {
+function drawPage(drawer: Drawer, participants: (Participant | null)[]): { svg: SVGSVGElement; overflows: OverflowInfo[] } {
   // ページごとに <svg> を作り、描画結果を入れる
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("xmlns", SVG_NS);
@@ -99,7 +100,7 @@ export type ViewArea = { x: number; y: number; width: number; height: number };
 // area を指定すると、その範囲だけを表示する SVG にする（ブロック 1 つの拡大表示に使う）
 export async function renderTemplatePreview(
   templateSvg: string,
-  participants: Participant[],
+  participants: (Participant | null)[], // null は空欄にするブロック（PSD 書き出しから渡される。spec.md 20.4）
   area?: ViewArea,
 ): Promise<SVGSVGElement> {
   await waitForFonts();
